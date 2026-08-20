@@ -33,7 +33,7 @@ if (USE_SPINE_3_8 OR USE_SPINE_4_2)
 else()
     cc_set_if_undefined(USE_SPINE            OFF)
 endif()
-cc_set_if_undefined(USE_WEBSOCKET_SERVER     OFF)
+cc_set_if_undefined(USE_WEBSOCKET_SERVER     ON)
 cc_set_if_undefined(USE_JOB_SYSTEM_TASKFLOW  OFF)
 cc_set_if_undefined(USE_JOB_SYSTEM_TBB       OFF)
 cc_set_if_undefined(USE_PHYSICS_PHYSX        OFF)
@@ -253,7 +253,7 @@ if(USE_XR)
         set(USE_WEBSOCKET_SERVER ON)
     endif()
 endif()
-
+set(USE_WEBSOCKET_SERVER ON)
 include(${EXTERNAL_ROOT}/CMakeLists.txt)
 
 ##### audio
