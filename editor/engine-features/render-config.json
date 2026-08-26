@@ -386,6 +386,16 @@
             "hidden": true,
             "envCondition": "$ANDROID"
         },
+        "gs-steam": {
+            "default": true,
+            "label": "i18n:ENGINE.features.vendor_steam.label",
+            "description": "i18n:ENGINE.features.vendor_steam.description",
+            "enginePlugin": false,
+            "isNativeModule": true,
+            "cmakeConfig": "USE_VENDOR_STEAM",
+            "hidden": true,
+            "envCondition": "$WINDOWS"
+        },
         "spine": {
             "label": "i18n:ENGINE.features.spine.label",
             "description": "i18n:ENGINE.features.spine.description",

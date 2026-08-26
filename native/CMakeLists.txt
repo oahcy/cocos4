@@ -55,7 +55,15 @@ cc_set_if_undefined(USE_REMOTE_LOG           OFF)
 cc_set_if_undefined(USE_ADPF                 OFF)
 cc_set_if_undefined(USE_GOOGLE_BILLING       OFF)
 cc_set_if_undefined(USE_GOOGLE_PLAY_GAMES    OFF)
+cc_set_if_undefined(USE_VENDOR_STEAM         OFF)
 cc_set_if_undefined(USE_GAMEPAD              ON)
+
+# Derived, not user-settable: the platform-agnostic gs framework + SWIG bindings are compiled iff any gs backend is on. New backend => add it here.
+if(USE_VENDOR_STEAM)
+    set(USE_VENDOR_GS ON)
+else()
+    set(USE_VENDOR_GS OFF)
+endif()
 
 if(ANDROID AND NOT DEFINED USE_CCACHE)
     if("$ENV{COCOS_USE_CCACHE}" STREQUAL "1")
@@ -843,6 +851,47 @@ cocos_source_files(
 )
 endif()
 
+if(USE_VENDOR_GS)
+cocos_source_files(
+    vendor/gs/common/JsUtils.cpp
+    vendor/gs/common/JsUtils.h
+    vendor/gs/common/ScopedListener.cpp
+    vendor/gs/common/ScopedListener.h
+    vendor/gs/Framework/GsServicesCommon.cpp
+    vendor/gs/Framework/Achievements.h
+    vendor/gs/Framework/AchievementsCommon.h
+    vendor/gs/Framework/Friends.h
+    vendor/gs/Framework/JsbConversions.h
+    vendor/gs/Framework/RemoteStorage.h
+    vendor/gs/Framework/Stats.h
+    vendor/gs/Framework/Utils.h
+    vendor/gs/Framework/commons/GsCallback.h
+    vendor/gs/Framework/commons/GsComponentRegistry.h
+    vendor/gs/Framework/commons/GsComponent.h
+    vendor/gs/Framework/commons/GsServices.h
+    vendor/gs/Framework/commons/GsServicesCommon.h
+    vendor/gs/Framework/commons/GsServicesRegistry.h
+    vendor/gs/Framework/commons/GsTypes.h
+)
+endif()
+
+if(USE_VENDOR_STEAM)
+cocos_source_files(
+    vendor/gs/Platform/Steam/AchievementsSteam.cpp
+    vendor/gs/Platform/Steam/AchievementsSteam.h
+    vendor/gs/Platform/Steam/FriendsSteam.cpp
+    vendor/gs/Platform/Steam/FriendsSteam.h
+    vendor/gs/Platform/Steam/RemoteStorageSteam.cpp
+    vendor/gs/Platform/Steam/RemoteStorageSteam.h
+    vendor/gs/Platform/Steam/StatsSteam.cpp
+    vendor/gs/Platform/Steam/StatsSteam.h
+    vendor/gs/Platform/Steam/UtilsSteam.cpp
+    vendor/gs/Platform/Steam/UtilsSteam.h
+    vendor/gs/Platform/Steam/SteamServicesModule.cpp
+    vendor/gs/Platform/Steam/SteamServicesModule.h
+)
+endif()
+
 if(ANDROID)
     cocos_source_files(
         cocos/platform/android/modules/Screen.cpp
@@ -1154,6 +1203,9 @@ endif()
 
 if(USE_GOOGLE_PLAY_GAMES)
     cc_gen_swig_files(${CMAKE_CURRENT_LIST_DIR}/tools/swig-config/android/google/play ${SWIG_OUTPUT})
+endif()
+if(USE_VENDOR_GS)
+    cc_gen_swig_files(${CMAKE_CURRENT_LIST_DIR}/tools/swig-config/gs ${SWIG_OUTPUT})
 endif()
 ##### platform
 cocos_source_files(
@@ -2347,6 +2399,13 @@ if(USE_GOOGLE_PLAY_GAMES)
     )
 endif()
 
+if(USE_VENDOR_GS)
+    cocos_source_files(
+        NO_WERROR   NO_UBUILD   ${SWIG_OUTPUT}/jsb_gs_auto.cpp
+                                ${SWIG_OUTPUT}/jsb_gs_auto.h
+    )
+endif()
+
 if(USE_XR_REMOTE_PREVIEW)
     cocos_source_files(
             NO_WERROR    cocos/xr/XRRemotePreviewManager.h
@@ -3448,6 +3507,8 @@ function(cc_apply_definations target)
         $<IF:$<BOOL:${USE_ADPF}>,CC_USE_ADPF=1,CC_USE_ADPF=0>
         $<IF:$<BOOL:${USE_GOOGLE_BILLING}>,CC_USE_GOOGLE_BILLING=1,CC_USE_GOOGLE_BILLING=0>
         $<IF:$<BOOL:${USE_GOOGLE_PLAY_GAMES}>,CC_USE_GOOGLE_PLAY_GAMES=1,CC_USE_GOOGLE_PLAY_GAMES=0>
+        $<IF:$<BOOL:${USE_VENDOR_GS}>,CC_USE_VENDOR_GS=1,CC_USE_VENDOR_GS=0>
+        $<IF:$<BOOL:${USE_VENDOR_STEAM}>,CC_USE_VENDOR_STEAM=1,CC_USE_VENDOR_STEAM=0>
         $<IF:$<BOOL:${USE_BOX2D_JSB}>,CC_USE_BOX2D_JSB=1,CC_USE_BOX2D_JSB=0>
         $<IF:$<BOOL:${USE_GAMEPAD}>,CC_USE_GAMEPAD=1,CC_USE_GAMEPAD=0>
     )

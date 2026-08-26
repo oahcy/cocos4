@@ -33,6 +33,7 @@ export * from './exports/tween';
 export * from './exports/ui-skew';
 export * from './exports/ui';
 export * from './exports/vendor-google';
+export * from './exports/gs';
 export * from './exports/video';
 export * from './exports/webview';
 export * from './exports/xr';

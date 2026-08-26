@@ -142,6 +142,14 @@
     #include "cocos/bindings/auto/jsb_google_play_auto.h"
 #endif
 
+#if CC_USE_VENDOR_GS
+    #include "cocos/bindings/auto/jsb_gs_auto.h"
+
+    #if CC_USE_VENDOR_STEAM
+        #include "vendor/gs/Platform/Steam/SteamServicesModule.h"
+    #endif
+#endif
+
 bool jsb_register_all_modules() {
     se::ScriptEngine *se = se::ScriptEngine::getInstance();
 
@@ -227,6 +235,18 @@ bool jsb_register_all_modules() {
 #if CC_USE_GOOGLE_PLAY_GAMES
     se->addRegisterCallback(register_all_play);
 #endif
+
+#if CC_USE_VENDOR_GS
+    // register_all_gs() covers the platform-agnostic framework interfaces only,
+    // so it must be called exactly once no matter how many backends are enabled.
+    se->addRegisterCallback(register_all_gs);
+
+    #if CC_USE_VENDOR_STEAM
+    static cc::Gs::SteamModuleInitializer s_steamModuleInit;
+    cc::Gs::GsServicesRegistry::get().addModuleInitializer(cc::Gs::GsServicesType::Steam, &s_steamModuleInit);
+    #endif
+
+#endif // CC_USE_VENDOR_GS
 
 #if CC_USE_MIDDLEWARE
     se->addRegisterCallback(register_all_editor_support);
