@@ -33,7 +33,9 @@
 #include "commons/GsCallback.h"
 #include "commons/GsTypes.h"
 
-inline bool nativevalue_to_se(const cc::Gs::AchievementDefinition& from, se::Value& to, se::Object*) {
+namespace cc::Gs {
+
+inline bool nativevalue_to_se(const AchievementDefinition& from, se::Value& to, se::Object*) {
     se::HandleObject obj(se::Object::createPlainObject());
     obj->setProperty("AchievementId", se::Value(from.AchievementId));
     obj->setProperty("DisplayName", se::Value(from.DisplayName));
@@ -42,7 +44,7 @@ inline bool nativevalue_to_se(const cc::Gs::AchievementDefinition& from, se::Val
     return true;
 }
 
-inline bool nativevalue_to_se(const cc::Gs::AchievementState& from, se::Value& to, se::Object*) {
+inline bool nativevalue_to_se(const AchievementState& from, se::Value& to, se::Object*) {
     se::HandleObject obj(se::Object::createPlainObject());
     obj->setProperty("AchievementId", se::Value(from.AchievementId));
     obj->setProperty("Progress", se::Value(from.Progress));
@@ -51,7 +53,7 @@ inline bool nativevalue_to_se(const cc::Gs::AchievementState& from, se::Value& t
     return true;
 }
 
-inline bool nativevalue_to_se(const cc::Gs::AchievementIdsResult& from, se::Value& to, se::Object*) {
+inline bool nativevalue_to_se(const AchievementIdsResult& from, se::Value& to, se::Object*) {
     se::HandleObject arr(se::Object::createArrayObject(from.AchievementIds.size()));
     for (uint32_t i = 0; i < from.AchievementIds.size(); i++) {
         arr->setArrayElement(i, se::Value(from.AchievementIds[i]));
@@ -64,7 +66,7 @@ inline bool nativevalue_to_se(const cc::Gs::AchievementIdsResult& from, se::Valu
     return true;
 }
 
-inline bool nativevalue_to_se(const cc::Gs::AchievementDefinitionResult& from, se::Value& to, se::Object* ctx) {
+inline bool nativevalue_to_se(const AchievementDefinitionResult& from, se::Value& to, se::Object* ctx) {
     se::HandleObject obj(se::Object::createPlainObject());
     se::Value defVal;
     nativevalue_to_se(from.Definition, defVal, ctx);
@@ -73,7 +75,7 @@ inline bool nativevalue_to_se(const cc::Gs::AchievementDefinitionResult& from, s
     return true;
 }
 
-inline bool nativevalue_to_se(const cc::Gs::AchievementStateResult& from, se::Value& to, se::Object* ctx) {
+inline bool nativevalue_to_se(const AchievementStateResult& from, se::Value& to, se::Object* ctx) {
     se::HandleObject obj(se::Object::createPlainObject());
     se::Value stateVal;
     nativevalue_to_se(from.State, stateVal, ctx);
@@ -82,7 +84,7 @@ inline bool nativevalue_to_se(const cc::Gs::AchievementStateResult& from, se::Va
     return true;
 }
 
-inline bool nativevalue_to_se(const cc::Gs::StatIntResult& from, se::Value& to, se::Object*) {
+inline bool nativevalue_to_se(const StatIntResult& from, se::Value& to, se::Object*) {
     se::HandleObject obj(se::Object::createPlainObject());
     obj->setProperty("Success", se::Value(from.Success));
     obj->setProperty("Value", se::Value(from.Value));
@@ -90,7 +92,7 @@ inline bool nativevalue_to_se(const cc::Gs::StatIntResult& from, se::Value& to, 
     return true;
 }
 
-inline bool nativevalue_to_se(const cc::Gs::StatFloatResult& from, se::Value& to, se::Object*) {
+inline bool nativevalue_to_se(const StatFloatResult& from, se::Value& to, se::Object*) {
     se::HandleObject obj(se::Object::createPlainObject());
     obj->setProperty("Success", se::Value(from.Success));
     obj->setProperty("Value", se::Value(from.Value));
@@ -133,7 +135,7 @@ inline bool sevalue_to_native(const se::Value& from, cc::Gs::EventDelegate<Args.
     return true;
 }
 
-inline bool nativevalue_to_se(const cc::Gs::FileInfo& from, se::Value& to, se::Object*) {
+inline bool nativevalue_to_se(const FileInfo& from, se::Value& to, se::Object*) {
     se::HandleObject obj(se::Object::createPlainObject());
     obj->setProperty("FileName", se::Value(from.FileName));
     obj->setProperty("FileSize", se::Value(from.FileSize));
@@ -141,7 +143,7 @@ inline bool nativevalue_to_se(const cc::Gs::FileInfo& from, se::Value& to, se::O
     return true;
 }
 
-inline bool nativevalue_to_se(const cc::Gs::QuotaInfo& from, se::Value& to, se::Object*) {
+inline bool nativevalue_to_se(const QuotaInfo& from, se::Value& to, se::Object*) {
     se::HandleObject obj(se::Object::createPlainObject());
     obj->setProperty("TotalBytes", se::Value(static_cast<double>(from.TotalBytes)));
     obj->setProperty("AvailableBytes", se::Value(static_cast<double>(from.AvailableBytes)));
@@ -149,7 +151,7 @@ inline bool nativevalue_to_se(const cc::Gs::QuotaInfo& from, se::Value& to, se::
     return true;
 }
 
-inline bool nativevalue_to_se(const cc::Gs::FileList& from, se::Value& to, se::Object* ctx) {
+inline bool nativevalue_to_se(const FileList& from, se::Value& to, se::Object* ctx) {
     se::HandleObject arr(se::Object::createArrayObject(from.Files.size()));
     for (uint32_t i = 0; i < from.Files.size(); i++) {
         se::Value fileVal;
@@ -164,7 +166,7 @@ inline bool nativevalue_to_se(const cc::Gs::FileList& from, se::Value& to, se::O
     return true;
 }
 
-inline bool nativevalue_to_se(const cc::Gs::FriendInfo& from, se::Value& to, se::Object*) {
+inline bool nativevalue_to_se(const FriendInfo& from, se::Value& to, se::Object*) {
     se::HandleObject obj(se::Object::createPlainObject());
     obj->setProperty("userId", se::Value(from.userId));
     obj->setProperty("personaName", se::Value(from.personaName));
@@ -174,7 +176,7 @@ inline bool nativevalue_to_se(const cc::Gs::FriendInfo& from, se::Value& to, se:
     return true;
 }
 
-inline bool nativevalue_to_se(const cc::Gs::FriendListResult& from, se::Value& to, se::Object* ctx) {
+inline bool nativevalue_to_se(const FriendListResult& from, se::Value& to, se::Object* ctx) {
     se::HandleObject arr(se::Object::createArrayObject(from.Friends.size()));
     for (uint32_t i = 0; i < from.Friends.size(); i++) {
         se::Value val;
@@ -189,7 +191,7 @@ inline bool nativevalue_to_se(const cc::Gs::FriendListResult& from, se::Value& t
     return true;
 }
 
-inline bool nativevalue_to_se(const cc::Gs::AvatarImage& from, se::Value& to, se::Object*) {
+inline bool nativevalue_to_se(const AvatarImage& from, se::Value& to, se::Object*) {
     se::HandleObject obj(se::Object::createPlainObject());
     obj->setProperty("width", se::Value(from.width));
     obj->setProperty("height", se::Value(from.height));
@@ -201,7 +203,7 @@ inline bool nativevalue_to_se(const cc::Gs::AvatarImage& from, se::Value& to, se
     return true;
 }
 
-inline bool nativevalue_to_se(const cc::Gs::FriendsGroupInfo& from, se::Value& to, se::Object*) {
+inline bool nativevalue_to_se(const FriendsGroupInfo& from, se::Value& to, se::Object*) {
     se::HandleObject obj(se::Object::createPlainObject());
     obj->setProperty("groupId", se::Value(static_cast<int>(from.groupId)));
     obj->setProperty("groupName", se::Value(from.groupName));
@@ -216,7 +218,7 @@ inline bool nativevalue_to_se(const cc::Gs::FriendsGroupInfo& from, se::Value& t
     return true;
 }
 
-inline bool nativevalue_to_se(const cc::Gs::FriendsGroupListResult& from, se::Value& to, se::Object* ctx) {
+inline bool nativevalue_to_se(const FriendsGroupListResult& from, se::Value& to, se::Object* ctx) {
     se::HandleObject arr(se::Object::createArrayObject(from.Groups.size()));
     for (uint32_t i = 0; i < from.Groups.size(); i++) {
         se::Value val;
@@ -230,3 +232,5 @@ inline bool nativevalue_to_se(const cc::Gs::FriendsGroupListResult& from, se::Va
     to.setObject(obj);
     return true;
 }
+
+} // namespace cc::Gs

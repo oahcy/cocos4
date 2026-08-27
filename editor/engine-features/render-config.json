@@ -394,7 +394,7 @@
             "isNativeModule": true,
             "cmakeConfig": "USE_VENDOR_STEAM",
             "hidden": true,
-            "envCondition": "$WINDOWS"
+            "envCondition": "$WINDOWS || $MAC"
         },
         "spine": {
             "label": "i18n:ENGINE.features.spine.label",

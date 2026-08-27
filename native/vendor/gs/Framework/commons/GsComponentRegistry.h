@@ -30,12 +30,11 @@
 #include <memory>
 #include <utility>
 
+#include "GsComponent.h"
 #include "base/Ptr.h"
 #include "base/RefCounted.h"
 
 namespace cc::Gs {
-
-class IGsComponent;
 
 // Owns one component instance per service interface. A concrete component is
 // registered under the interface it implements (e.g. AchievementsSteam under

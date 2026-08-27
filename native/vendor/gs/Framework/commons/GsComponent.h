@@ -24,8 +24,6 @@
 
 #pragma once
 
-#include "GsComponentRegistry.h"
-
 #include "base/Ptr.h"
 
 namespace cc::Gs {

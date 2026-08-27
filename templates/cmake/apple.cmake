@@ -173,6 +173,15 @@ macro(cc_mac_after_target _target_name)
         ${CC_PROJECT_DIR}/../common/Classes
     )
 
+    if(USE_VENDOR_STEAM AND EXISTS "${EXTERNAL_ROOT}/mac/libs/libsteam_api.dylib")
+        add_custom_command(TARGET ${CC_EXECUTABLE_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${EXTERNAL_ROOT}/mac/libs/libsteam_api.dylib"
+            "$<TARGET_FILE_DIR:${CC_EXECUTABLE_NAME}>/libsteam_api.dylib"
+            COMMENT "Copying libsteam_api.dylib into the target output directory"
+        )
+    endif()
+
     if(USE_SERVER_MODE)
         if(EXISTS ${RES_DIR}/data/jsb-adapter)
             set(bin_dir ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR})
@@ -203,9 +212,18 @@ macro(cc_mac_after_target _target_name)
         cc_apple_set_launch_type(${CC_EXECUTABLE_NAME})
 
         if(ENABLE_SANDBOX)
-            set_target_properties(${CC_EXECUTABLE_NAME} PROPERTIES
-                XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CC_PROJECT_DIR}/entitlements.plist"
-            )
+            if(USE_VENDOR_STEAM)
+                # The Steam API locates the client through the real home directory and
+                # the com.valvesoftware.steam.ipctool Mach service; App Sandbox denies
+                # both, so SteamAPI_Init fails with "Could not determine Steam client
+                # install directory". Steam titles never ship through the Mac App Store,
+                # which is the only channel that requires the sandbox.
+                message(STATUS "USE_VENDOR_STEAM is ON, skipping App Sandbox entitlements (incompatible with the Steam client)")
+            else()
+                set_target_properties(${CC_EXECUTABLE_NAME} PROPERTIES
+                    XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CC_PROJECT_DIR}/entitlements.plist"
+                )
+            endif()
         endif()
     endif()
 
