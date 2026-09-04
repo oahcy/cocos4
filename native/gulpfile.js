@@ -99,8 +99,13 @@ gulp.task('gen-simulator', async function () {
             cwd: simulatorProject,
             env: newEnv,
         });
-        cmakeProcess.on('close', () => {
-            console.log('cmake finished!');
+        cmakeProcess.on('close', (code) => {
+            if (code !== 0) {
+                console.error(`cmake configure failed with exit code ${code}`);
+                reject(new Error(`cmake configure failed with exit code ${code}`));
+                return;
+            }
+            console.log('cmake configure finished!');
             resolve();
         });
         cmakeProcess.on('error', err => {
@@ -119,7 +124,10 @@ gulp.task('gen-simulator', async function () {
     console.log('build project\n');
     console.log('=====================================\n');
     await new Promise((resolve, reject) => {
-        let makeArgs = ['--build', simulatorProject];
+        // 限制编译并行度，避免 cl.exe 堆耗尽（C1060）/ MSBuild OutOfMemoryException
+        const buildParallel = parseInt(process.env.SIMULATOR_BUILD_PARALLEL || '2', 10);
+        let makeArgs = ['--build', simulatorProject, '--parallel', String(buildParallel)];
+        console.info(`==> Building with parallel jobs: ${buildParallel}`);
         if (!isWin32) {
             if (process.env.ARCH && process.env.ARCH.length > 0) {
                 console.info(`==> Found ARCH env: ${process.env.ARCH}`);
@@ -138,8 +146,13 @@ gulp.task('gen-simulator', async function () {
             cwd: simulatorProject,
             env: newEnv,
         });
-        buildProcess.on('close', () => {
-            console.log('cmake finished!');
+        buildProcess.on('close', (code) => {
+            if (code !== 0) {
+                console.error(`cmake build failed with exit code ${code}`);
+                reject(new Error(`cmake build failed with exit code ${code}`));
+                return;
+            }
+            console.log('cmake build finished!');
             resolve();
         });
         buildProcess.on('error', err => {
