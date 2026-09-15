@@ -30,14 +30,9 @@
 namespace cc::Gs {
 
 void RemoteStorageSteam::shutdown() {
-    // Mark shut down FIRST so any re-entrant call from dropped JS callbacks
-    // hits isShutdown() and fails fast instead of touching a torn-down session.
-    Super::shutdown();
     // Cancel in-flight async calls before SteamAPI_Shutdown. This makes both
     // CCallResult members inert, so their destructors are safe no-ops later.
-    // Pending callbacks are dropped, not invoked: running user JS inside the
-    // teardown stack would be re-entrant, and the TS lifecycle token has already
-    // invalidated every helper, so the JS side can only log, never act.
+    // The session has already cancelled requests before backend shutdown.
     _writeCallResult.Cancel();
     if (_pendingWriteCallback) {
         CC_LOG_WARNING("[RemoteStorage] Pending write cancelled during shutdown");
@@ -51,11 +46,6 @@ void RemoteStorageSteam::shutdown() {
 }
 
 void RemoteStorageSteam::writeFile(const std::string& fileName, const std::string& data, OnComplete callback) {
-    if (isShutdown()) {
-        callback.failure("Services shut down");
-        return;
-    }
-
     // Prevent memory leak: fail the new request if the component is busy.
     // Overwriting a pending callback causes the previous JS promise to hang indefinitely.
     if (_writeCallResult.IsActive()) {
@@ -77,18 +67,13 @@ void RemoteStorageSteam::writeFile(const std::string& fileName, const std::strin
 
 void RemoteStorageSteam::onWriteComplete(RemoteStorageFileWriteAsyncComplete_t* pResult, bool bIOFailure) {
     if (bIOFailure || pResult->m_eResult != k_EResultOK) {
-        _pendingWriteCallback.failure("FileWriteAsync failed");
+        _pendingWriteCallback.failure(bIOFailure ? "FileWriteAsync IO failure" : "FileWriteAsync failed, EResult=" + std::to_string(pResult->m_eResult));
     } else {
         _pendingWriteCallback.success();
     }
 }
 
 void RemoteStorageSteam::readFile(const std::string& fileName, OnReadFile callback) {
-    if (isShutdown()) {
-        callback.failure("Services shut down");
-        return;
-    }
-
     // Prevent memory leak: fail the new request if the component is busy.
     // Overwriting a pending callback causes the previous JS promise to hang indefinitely.
     if (_readCallResult.IsActive()) {
@@ -97,8 +82,12 @@ void RemoteStorageSteam::readFile(const std::string& fileName, OnReadFile callba
     }
 
     int32_t fileSize = SteamRemoteStorage()->GetFileSize(fileName.c_str());
-    if (fileSize <= 0) {
-        callback.failure("File not found or empty: " + fileName);
+    if (fileSize < 0 || !SteamRemoteStorage()->FileExists(fileName.c_str())) {
+        callback.failure("File not found: " + fileName);
+        return;
+    }
+    if (fileSize == 0) {
+        callback.success("");
         return;
     }
 
@@ -116,7 +105,7 @@ void RemoteStorageSteam::readFile(const std::string& fileName, OnReadFile callba
 
 void RemoteStorageSteam::onReadComplete(RemoteStorageFileReadAsyncComplete_t* pResult, bool bIOFailure) {
     if (bIOFailure || pResult->m_eResult != k_EResultOK) {
-        _pendingReadCallback.failure("FileReadAsync failed");
+        _pendingReadCallback.failure(bIOFailure ? "FileReadAsync IO failure" : "FileReadAsync failed, EResult=" + std::to_string(pResult->m_eResult));
         return;
     }
 
@@ -130,10 +119,6 @@ void RemoteStorageSteam::onReadComplete(RemoteStorageFileReadAsyncComplete_t* pR
 }
 
 void RemoteStorageSteam::deleteFile(const std::string& fileName, OnComplete callback) {
-    if (isShutdown()) {
-        callback.failure("Services shut down");
-        return;
-    }
     bool ok = SteamRemoteStorage()->FileDelete(fileName.c_str());
     if (ok) {
         callback.success();
@@ -143,22 +128,18 @@ void RemoteStorageSteam::deleteFile(const std::string& fileName, OnComplete call
 }
 
 bool RemoteStorageSteam::fileExists(const std::string& fileName) {
-    if (isShutdown()) return false;
     return SteamRemoteStorage()->FileExists(fileName.c_str());
 }
 
 int32_t RemoteStorageSteam::getFileSize(const std::string& fileName) {
-    if (isShutdown()) return 0;
     return SteamRemoteStorage()->GetFileSize(fileName.c_str());
 }
 
 int32_t RemoteStorageSteam::getFileCount() {
-    if (isShutdown()) return 0;
     return SteamRemoteStorage()->GetFileCount();
 }
 
 FileList RemoteStorageSteam::getFileList() {
-    if (isShutdown()) return {};
     FileList result;
     int32_t count = SteamRemoteStorage()->GetFileCount();
     result.Files.reserve(count);
@@ -174,9 +155,12 @@ FileList RemoteStorageSteam::getFileList() {
 }
 
 QuotaInfo RemoteStorageSteam::getQuota() {
-    if (isShutdown()) return {};
     QuotaInfo info;
-    SteamRemoteStorage()->GetQuota(&info.TotalBytes, &info.AvailableBytes);
+    info.Success = SteamRemoteStorage()->GetQuota(&info.TotalBytes, &info.AvailableBytes);
+    if (!info.Success) {
+        info.TotalBytes = 0;
+        info.AvailableBytes = 0;
+    }
     return info;
 }
 

@@ -25,105 +25,95 @@
 #pragma once
 
 #include <string>
-
 #ifndef SWIG
-#include "vendor/gs/common/ScopedListener.h"
-#include "vendor/gs/common/JsUtils.h"
+#include <functional>
+#include <memory>
+#include <utility>
 #endif
 
 namespace cc::Gs {
 
-// ── One-shot async callback (auto-reset after success/failure) ──
-
-class AsyncCallbackBase {
-public:
-    AsyncCallbackBase() = default;
-
-#ifndef SWIG
-    ~AsyncCallbackBase() = default;
-    AsyncCallbackBase(const AsyncCallbackBase&) = default;
-    AsyncCallbackBase& operator=(const AsyncCallbackBase&) = default;
-    AsyncCallbackBase(AsyncCallbackBase&&) noexcept = default;
-    AsyncCallbackBase& operator=(AsyncCallbackBase&&) noexcept = default;
-
-    void bind(se::Object* obj) { _listener.reset(obj); }
-
-    void success() {
-        if (_listener) {
-            callJSfunc(_listener.get(), "onSuccess");
-            _listener.reset();
-        }
-    }
-
-    void failure(const std::string& message) {
-        if (_listener) {
-            callJSfunc(_listener.get(), "onFailure", message);
-            _listener.reset();
-        }
-    }
-
-    explicit operator bool() const { return static_cast<bool>(_listener); }
-    void reset() { _listener.reset(); }
-
-protected:
-    scopedListener _listener;
-#endif
-};
-
-using OnComplete = AsyncCallbackBase;
-
-// ── Persistent event delegate (survives multiple invocations) ──
-
-class EventDelegateBase {
-public:
-    EventDelegateBase() = default;
-
-#ifndef SWIG
-    ~EventDelegateBase() = default;
-    EventDelegateBase(const EventDelegateBase&) = default;
-    EventDelegateBase& operator=(const EventDelegateBase&) = default;
-    EventDelegateBase(EventDelegateBase&&) noexcept = default;
-    EventDelegateBase& operator=(EventDelegateBase&&) noexcept = default;
-
-    void bind(se::Object* obj) { _listener.reset(obj); }
-
-    explicit operator bool() const { return static_cast<bool>(_listener); }
-    void reset() { _listener.reset(); }
-
-protected:
-    scopedListener _listener;
-#endif
-};
-
-#ifndef SWIG
-template<typename... Args>
-class EventDelegate : public EventDelegateBase {
-public:
-    void invoke(const Args&... args) {
-        if (_listener) {
-            invokeJSfunc(_listener.get(), args...);
-        }
-    }
-};
-
-template<typename... Args>
-class AsyncCallback : public AsyncCallbackBase {
-public:
-    void success(const Args&... args) {
-        if (_listener) {
-            callJSfunc(_listener.get(), "onSuccess", args...);
-            _listener.reset();
-        }
-    }
-};
-#endif
-
 #ifdef SWIG
+class AsyncCallbackBase {};
+class EventDelegateBase {};
+using OnComplete = AsyncCallbackBase;
 using OnAchievementStateUpdated = EventDelegateBase;
 using OnReadFile = AsyncCallbackBase;
 using OnWarningMessage = EventDelegateBase;
 using OnGameRichPresenceJoinRequested = EventDelegateBase;
 #else
+// Shared by callbacks and the session; contains no back-reference to the session.
+struct SessionGate { bool active = false; };
+
+class PendingCallback {
+public:
+    virtual ~PendingCallback() = default;
+    virtual void cancel(const std::string& error) = 0;
+    bool completed = false;
+    std::shared_ptr<SessionGate> gate;
+};
+
+template<typename... Args>
+class AsyncCallback {
+    struct State : PendingCallback {
+        std::function<void(Args...)> success;
+        std::function<void(const std::string&)> failure;
+        void cancel(const std::string& error) override {
+            if (completed) return;
+            completed = true;
+            auto fn = std::move(failure);
+            success = nullptr;
+            if (fn) fn(error);
+        }
+    };
+public:
+    AsyncCallback() = default;
+    AsyncCallback(std::function<void(Args...)> success,
+                  std::function<void(const std::string&)> failure) : _state(std::make_shared<State>()) {
+        _state->success = std::move(success);
+        _state->failure = std::move(failure);
+    }
+    void success(Args... args) const {
+        auto state = _state; // A callback can close its session and release its owner.
+        if (!state || state->completed) return;
+        if (state->gate && !state->gate->active) {
+            state->cancel("Services closed");
+            return;
+        }
+        state->completed = true;
+        auto fn = std::move(state->success);
+        state->failure = nullptr;
+        if (fn) fn(std::forward<Args>(args)...);
+    }
+    void failure(const std::string& error) const {
+        auto state = _state;
+        if (state) state->cancel(error);
+    }
+    explicit operator bool() const { return _state && !_state->completed; }
+    void reset() { _state.reset(); }
+    std::shared_ptr<PendingCallback> pending() const { return _state; }
+private:
+    std::shared_ptr<State> _state;
+};
+
+template<typename... Args>
+class EventDelegate {
+public:
+    EventDelegate() = default;
+    explicit EventDelegate(std::function<void(const Args&...)> callback) : _callback(std::move(callback)) {}
+    void invoke(const Args&... args) const {
+        auto fn = _callback;
+        if (fn && (!_gate || _gate->active)) fn(args...);
+    }
+    void setGate(std::shared_ptr<SessionGate> gate) { _gate = std::move(gate); }
+    explicit operator bool() const { return static_cast<bool>(_callback); }
+    void reset() { _callback = nullptr; _gate.reset(); }
+private:
+    std::function<void(const Args&...)> _callback;
+    std::shared_ptr<SessionGate> _gate;
+};
+
+using OnComplete = AsyncCallback<>;
 using OnAchievementStateUpdated = EventDelegate<std::string, float, uint32_t>;
 using OnReadFile = AsyncCallback<std::string>;
 using OnWarningMessage = EventDelegate<int, std::string>;

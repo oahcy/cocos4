@@ -24,137 +24,55 @@
 
 #pragma once
 
-#include "GsServices.h"
-
-#include <string>
+#include <functional>
 #include <unordered_map>
-#include <memory>
-
-#include "base/Log.h"
-#include "base/Ptr.h"
+#include <vector>
+#include "GsServices.h"
 
 namespace cc::Gs {
 
-// --- IGsModuleInitializer ---
-
-class GsServicesRegistry;
-
-class IGsModuleInitializer {
-public:
-    virtual ~IGsModuleInitializer() = default;
-    virtual void registerFactories(GsServicesRegistry& registry) = 0;
-};
-
-// --- IGsServicesFactory ---
-
-class IGsServicesFactory {
-public:
-    virtual ~IGsServicesFactory() = default;
-    virtual cc::IntrusivePtr<IGsServices> create(std::string instanceName, std::string instanceConfigName) = 0;
-};
-
-// --- GsServicesRegistry singleton ---
-
 class GsServicesRegistry {
 public:
+    using Factory = std::function<IntrusivePtr<IGsServices>()>;
     static GsServicesRegistry& get() {
-        static GsServicesRegistry instance;
-        return instance;
+        static GsServicesRegistry registry;
+        return registry;
     }
-
-    void addModuleInitializer(GsServicesType type, IGsModuleInitializer* init) {
-        _moduleInitializers[static_cast<size_t>(type)] = init;
+    void registerProvider(GsServicesType provider, Factory factory) {
+        _factories[provider] = std::move(factory);
     }
-
-    void ensureInitialized() {
-        for (size_t i = 0; i < static_cast<size_t>(GsServicesType::GsServicesType_Max); ++i) {
-            if (_moduleInitializers[i] && !_initializedModules[i]) {
-                _initializedModules[i] = true;
-                _moduleInitializers[i]->registerFactories(*this);
-            }
+    IntrusivePtr<IGsServices> getServicesInstance(GsServicesType provider) {
+        if (_cleaningUp) return nullptr;
+        auto found = _services.find(provider);
+        if (found != _services.end()) {
+            // Do not initialize a replacement SDK while an old callback is unwinding.
+            if (found->second->isClosing()) return nullptr;
+            if (!found->second->isClosed()) return found->second;
         }
-    }
-
-    void registerServicesFactory(
-        GsServicesType servicesType,
-        std::unique_ptr<IGsServicesFactory> factory)
-    {
-        _servicesFactories[servicesType] = std::move(factory);
-        CC_LOG_INFO("[Registry] Registered factory for services type %d", (int)servicesType);
-    }
-
-    void unregisterServicesFactory(GsServicesType servicesType) {
-        _servicesFactories.erase(servicesType);
-    }
-
-    cc::IntrusivePtr<IGsServices> getNamedServicesInstance(
-        GsServicesType servicesType,
-        const std::string& instanceName = "",
-        const std::string& instanceConfigName = "")
-    {
-        auto& instanceMap = _namedServiceInstances[servicesType];
-        std::string cacheKey = instanceName + "|" + instanceConfigName;
-        auto it = instanceMap.find(cacheKey);
-        if (it != instanceMap.end()) {
-            return it->second;
-        }
-
-        // Platform SDKs (Steam, Epic, ...) tend to hold process-wide singleton
-        // state under the hood, so a second differently-named instance of the
-        // same GsServicesType would end up sharing/stomping the same underlying
-        // session anyway. Reuse the existing instance instead of creating a
-        // conflicting second one; this only restricts instances within the same
-        // type, other types (e.g. Epic while Steam is active) are unaffected.
-        if (!instanceMap.empty()) {
-            CC_LOG_ERROR("[GsServicesRegistry] Services type %d already has an active instance; "
-                         "creating multiple simultaneous instances of the same platform is not "
-                         "supported. Reusing the existing instance instead of instanceName=\"%s\" instanceConfigName=\"%s\".",
-                         static_cast<int>(servicesType), instanceName.c_str(), instanceConfigName.c_str());
-            return instanceMap.begin()->second;
-        }
-
-        auto services = createServices(servicesType, instanceName, instanceConfigName);
-        if (services) {
-            instanceMap[cacheKey] = services;
-        }
+        auto factory = _factories.find(provider);
+        if (factory == _factories.end()) return nullptr;
+        auto services = factory->second();
+        if (services) _services[provider] = services;
         return services;
     }
-
-    void removeNamedServicesInstance(
-        GsServicesType servicesType,
-        const std::string& instanceName = "",
-        const std::string& instanceConfigName = "")
-    {
-        auto outerIt = _namedServiceInstances.find(servicesType);
-        if (outerIt == _namedServiceInstances.end()) return;
-        std::string cacheKey = instanceName + "|" + instanceConfigName;
-        outerIt->second.erase(cacheKey);
+    void tick(float dt) {
+        // Callbacks may request other providers; never iterate a mutable map while pumping.
+        std::vector<IntrusivePtr<IGsServices>> services;
+        for (auto& entry : _services) services.push_back(entry.second);
+        for (auto& service : services) service->tick(dt);
     }
-
+    void destroyServices() {
+        if (_cleaningUp) return;
+        _cleaningUp = true;
+        for (auto& entry : _services) entry.second->destroy();
+        _services.clear();
+        _cleaningUp = false;
+    }
 private:
     GsServicesRegistry() = default;
-
-    cc::IntrusivePtr<IGsServices> createServices(
-        GsServicesType servicesType,
-        const std::string& instanceName,
-        const std::string& instanceConfigName)
-    {
-        auto it = _servicesFactories.find(servicesType);
-        if (it == _servicesFactories.end()) {
-            CC_LOG_ERROR("[Registry] No factory registered for services type %d", (int)servicesType);
-            return nullptr;
-        }
-
-        CC_LOG_INFO("[Registry] Creating services instance for type %d", (int)servicesType);
-        auto services = it->second->create(instanceName, instanceConfigName);
-        return services;
-    }
-
-    std::unordered_map<GsServicesType, std::unique_ptr<IGsServicesFactory>> _servicesFactories;
-    std::unordered_map<GsServicesType, std::unordered_map<std::string, cc::IntrusivePtr<IGsServices>>> _namedServiceInstances;
-
-    IGsModuleInitializer* _moduleInitializers[static_cast<size_t>(GsServicesType::GsServicesType_Max)] = {};
-    bool _initializedModules[static_cast<size_t>(GsServicesType::GsServicesType_Max)] = {};
+    std::unordered_map<GsServicesType, Factory> _factories;
+    std::unordered_map<GsServicesType, IntrusivePtr<IGsServices>> _services;
+    bool _cleaningUp = false;
 };
 
 } // namespace cc::Gs

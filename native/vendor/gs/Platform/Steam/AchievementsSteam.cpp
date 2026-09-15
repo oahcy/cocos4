@@ -4,26 +4,18 @@
 
 namespace cc::Gs {
 
-void AchievementsSteam::initialize() {
-    CC_LOG_INFO("[AchievementsSteam] Initialize (real SDK)");
-}
-
 void AchievementsSteam::shutdown() {
     // Unregister Steam callbacks while the session is still alive; their
     // destructors may run after SteamAPI_Shutdown and unregistering here turns
     // those into safe no-ops.
     _cbUserStatsStored.Unregister();
     _cbAchievementStored.Unregister();
+    _onUpdatedCallback.reset();
     _definitions.reset();
     _states.clear();
-    Super::shutdown();
 }
 
 void AchievementsSteam::queryAchievementDefinitions(OnComplete callback) {
-    if (isShutdown()) {
-        callback.failure("Services shut down");
-        return;
-    }
     auto* stats = SteamUserStats();
     if (!stats) {
         callback.failure("SteamUserStats interface unavailable");
@@ -51,14 +43,11 @@ void AchievementsSteam::queryAchievementDefinitions(OnComplete callback) {
     }
 
     _definitions = std::move(defs);
+    _states.clear();
     callback.success();
 }
 
 void AchievementsSteam::queryAchievementStates(OnComplete callback) {
-    if (isShutdown()) {
-        callback.failure("Services shut down");
-        return;
-    }
     auto* stats = SteamUserStats();
     if (!stats) {
         callback.failure("SteamUserStats interface unavailable");
@@ -71,7 +60,11 @@ void AchievementsSteam::queryAchievementStates(OnComplete callback) {
     }
 
     for (const auto& pair : *_definitions) {
-        updateCachedState(stats, pair.first);
+        if (!updateCachedState(stats, pair.first)) {
+            _states.clear();
+            callback.failure("Failed to read achievement: " + pair.first);
+            return;
+        }
     }
 
     CC_LOG_INFO("[Steam] Cached %d achievement states", static_cast<int>(_states.size()));
@@ -79,10 +72,6 @@ void AchievementsSteam::queryAchievementStates(OnComplete callback) {
 }
 
 void AchievementsSteam::unlockAchievements(const std::string& achievementId, OnComplete callback) {
-    if (isShutdown()) {
-        callback.failure("Services shut down");
-        return;
-    }
     auto* stats = SteamUserStats();
     if (!stats) {
         callback.failure("SteamUserStats interface unavailable");
@@ -106,10 +95,6 @@ void AchievementsSteam::unlockAchievements(const std::string& achievementId, OnC
 }
 
 void AchievementsSteam::clearAchievement(const std::string& achievementId, OnComplete callback) {
-    if (isShutdown()) {
-        callback.failure("Services shut down");
-        return;
-    }
     auto* stats = SteamUserStats();
     if (!stats) {
         callback.failure("SteamUserStats interface unavailable");
@@ -132,21 +117,26 @@ void AchievementsSteam::clearAchievement(const std::string& achievementId, OnCom
     callback.success();
 }
 
-void AchievementsSteam::updateCachedState(ISteamUserStats* stats, const std::string& achievementId, float progressOverride) {
+bool AchievementsSteam::updateCachedState(ISteamUserStats* stats, const std::string& achievementId, float progressOverride) {
     bool achieved = false;
     uint32 unlockTime = 0;
-    stats->GetAchievementAndUnlockTime(achievementId.c_str(), &achieved, &unlockTime);
+    if (!stats || !stats->GetAchievementAndUnlockTime(achievementId.c_str(), &achieved, &unlockTime)) {
+        _states.erase(achievementId);
+        return false;
+    }
 
     AchievementState state;
     state.AchievementId = achievementId;
     state.Progress = progressOverride >= 0.0f ? progressOverride : (achieved ? 100.0f : 0.0f);
     state.UnlockTimeSec = unlockTime;
     _states[achievementId] = state;
+    return true;
 }
 
 void AchievementsSteam::onUserStatsStored(UserStatsStored_t* pCallback) {
     if (pCallback->m_eResult != k_EResultOK) {
-        std::cerr << "    [Steam] StoreStats failed, EResult=" << pCallback->m_eResult << "\n";
+        invalidateStates();
+        CC_LOG_ERROR("[Steam] StoreStats failed, EResult=%d", static_cast<int>(pCallback->m_eResult));
         return;
     }
     CC_LOG_INFO("[Steam] StoreStats OK");
@@ -169,20 +159,19 @@ void AchievementsSteam::onAchievementStored(UserAchievementStored_t* pCallback) 
 
     if (isProgress && max > 0) {
         float pct = static_cast<float>(cur) / static_cast<float>(max) * 100.0f;
-        updateCachedState(stats, achName, pct);
+        if (!updateCachedState(stats, achName, pct)) return;
     } else {
-        updateCachedState(stats, achName);
+        if (!updateCachedState(stats, achName)) return;
     }
 
     auto* user = SteamUser();
     if (!user) return;
 
-    notifyAchievementUpdated(std::to_string(user->GetSteamID().ConvertToUint64()), achName, _states[achName]);
+    _onUpdatedCallback.invoke(achName, _states[achName].Progress, _states[achName].UnlockTimeSec);
 }
 
 AchievementIdsResult
 AchievementsSteam::getAchievementIds() {
-    if (isShutdown()) return AchievementIdsResult{};
     AchievementIdsResult out;
     if (!_definitions.has_value()) return out;
     for (const auto& pair : *_definitions) {
@@ -193,22 +182,22 @@ AchievementsSteam::getAchievementIds() {
 
 AchievementDefinitionResult
 AchievementsSteam::getAchievementDefinition(const std::string& achievementId) {
-    if (isShutdown()) return AchievementDefinitionResult{};
     AchievementDefinitionResult out;
     if (!_definitions.has_value()) return out;
     auto it = _definitions->find(achievementId);
     if (it == _definitions->end()) return out;
     out.Definition = it->second;
+    out.Found = true;
     return out;
 }
 
 AchievementStateResult
 AchievementsSteam::getAchievementState(const std::string& achievementId) {
-    if (isShutdown()) return AchievementStateResult{};
     AchievementStateResult out;
     auto it = _states.find(achievementId);
     if (it == _states.end()) return out;
     out.State = it->second;
+    out.Found = true;
     return out;
 }
 

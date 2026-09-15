@@ -49,8 +49,7 @@ using namespace cc::Gs;
 %ignore cc::Gs::StatIntResult;
 %ignore cc::Gs::StatFloatResult;
 
-// tick is driven internally by the engine Tick event (_tickListener in
-// GsServicesCommon), so it must not be exposed to JS.
+// Tick is driven by the script-context listener registered in jsb_module_register.cpp.
 %ignore cc::Gs::IGsServices::tick;
 
 %nodefaultctor cc::Gs::IGsServices;

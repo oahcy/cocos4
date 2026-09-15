@@ -234,20 +234,16 @@ export declare namespace gs {
     // ────────────────────────────────────────────────────
 
     /**
-     * @en Get or create a game services instance.
+     * @en Get or create the single game services instance for a provider.
      *     Returns null if no factory is registered for the given type.
      *     Call init() explicitly after restartAppIfNecessary check.
-     * @zh 获取或创建游戏服务实例。
+     * @zh 获取或创建指定平台的唯一游戏服务实例。
      *     未注册对应平台工厂时返回 null。
      *     需在 restartAppIfNecessary 检查后显式调用 init()。
      * @param servicesType - The provider type (default: Steam).
-     * @param instanceName - Optional instance name for multiple instances.
-     * @param instanceConfigName - Optional config name.
      */
     export function getServices (
         servicesType?: ServicesProvider,
-        instanceName?: string,
-        instanceConfigName?: string,
     ): Services | null;
 
     // ────────────────────────────────────────────────────
@@ -300,7 +296,11 @@ export declare namespace gs {
 
         /**
          * @en Destroy the services instance and release resources.
+         *     This session is permanently closed. Fetch a new instance with getServices().
+         *     Pending requests reject; calls during event dispatch defer resource release until dispatch ends.
          * @zh 销毁服务实例并释放资源。
+         *     当前会话永久关闭，需通过 getServices() 获取新实例。未完成请求会失败；
+         *     在事件回调中关闭时，资源释放会延后到当前调用结束。
          */
         destroy (): void;
 
@@ -538,8 +538,8 @@ export declare namespace gs {
         getFileList (): FileInfo[];
 
         /**
-         * @en Get cloud storage quota info.
-         * @zh 获取云存储配额信息。
+         * @en Get cloud storage quota info. Throws if the query fails.
+         * @zh 获取云存储配额信息，查询失败时抛出异常。
          */
         getQuota (): QuotaInfo;
     }

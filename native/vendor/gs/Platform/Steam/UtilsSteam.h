@@ -1,17 +1,12 @@
 #pragma once
 
 #include <steam_api.h>
-#include "../../Framework/Utils.h"
-#include "../../Framework/commons/GsComponent.h"
+#include "../../Framework/backends/UtilsBackend.h"
 
 namespace cc::Gs {
 
-class UtilsSteam : public GsComponent<IUtils> {
+class UtilsSteam : public IUtilsBackend {
 public:
-    using Super = GsComponent<IUtils>;
-
-    explicit UtilsSteam(GsServicesCommon& inServices)
-        : Super(inServices) {}
 
     void shutdown() override;
 

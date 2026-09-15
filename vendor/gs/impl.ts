@@ -27,6 +27,7 @@ import './core/enums';
 import {
     GsServicesHelper,
     AchievementsHelper,
+    FriendsHelper,
     RemoteStorageHelper,
     StatsHelper,
     UtilsHelper,
@@ -46,6 +47,7 @@ export namespace gs {
 
     export const Services = GsServicesHelper;
     export const Achievements = AchievementsHelper;
+    export const Friends = FriendsHelper;
     export const RemoteStorage = RemoteStorageHelper;
     export const Stats = StatsHelper;
     export const Utils = UtilsHelper;

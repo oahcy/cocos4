@@ -25,17 +25,12 @@
 #pragma once
 
 #include <steam_api.h>
-#include "../../Framework/RemoteStorage.h"
-#include "../../Framework/commons/GsComponent.h"
+#include "../../Framework/backends/RemoteStorageBackend.h"
 
 namespace cc::Gs {
 
-class RemoteStorageSteam : public GsComponent<IRemoteStorage> {
+class RemoteStorageSteam : public IRemoteStorageBackend {
 public:
-    using Super = GsComponent<IRemoteStorage>;
-
-    explicit RemoteStorageSteam(GsServicesCommon& inServices)
-        : Super(inServices) {}
 
     void shutdown() override;
 

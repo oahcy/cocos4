@@ -54,6 +54,8 @@ public:
     virtual bool init() = 0;
     virtual void destroy() = 0;
     virtual void tick(float deltaTime) = 0;
+    virtual bool isClosed() const = 0;
+    virtual bool isClosing() const = 0;
 
     virtual GsServicesType getServicesProvider() const = 0;
 
@@ -65,10 +67,7 @@ public:
 
     virtual bool restartAppIfNecessary(const AppId& /*appId*/) { return false; }
 
-    static cc::IntrusivePtr<IGsServices> getServices(
-        GsServicesType servicesType,
-        const std::string& instanceName = "",
-        const std::string& instanceConfigName = "");
+    static cc::IntrusivePtr<IGsServices> getServices(GsServicesType servicesType);
 };
 
 } // namespace cc::Gs

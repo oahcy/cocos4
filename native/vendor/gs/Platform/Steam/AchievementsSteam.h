@@ -2,21 +2,20 @@
 
 #include <optional>
 #include <steam_api.h>
-#include "../../Framework/AchievementsCommon.h"
+#include <unordered_map>
+#include "../../Framework/backends/AchievementsBackend.h"
 
 namespace cc::Gs {
 
-class AchievementsSteam : public AchievementsCommon {
+class AchievementsSteam : public IAchievementsBackend {
 public:
-    using Super = AchievementsCommon;
-
-    explicit AchievementsSteam(GsServicesCommon& inServices)
-        : AchievementsCommon(inServices)
-        , _cbUserStatsStored(this, &AchievementsSteam::onUserStatsStored)
+    AchievementsSteam()
+        : _cbUserStatsStored(this, &AchievementsSteam::onUserStatsStored)
         , _cbAchievementStored(this, &AchievementsSteam::onAchievementStored) {}
 
-    void initialize() override;
+    void setOnAchievementStateUpdated(OnAchievementStateUpdated callback) override { _onUpdatedCallback = std::move(callback); }
     void shutdown() override;
+    void invalidateStates() { _states.clear(); }
 
     void queryAchievementDefinitions(OnComplete callback) override;
     void queryAchievementStates(OnComplete callback) override;
@@ -31,11 +30,12 @@ private:
     STEAM_CALLBACK(AchievementsSteam, onUserStatsStored, UserStatsStored_t, _cbUserStatsStored);
     STEAM_CALLBACK(AchievementsSteam, onAchievementStored, UserAchievementStored_t, _cbAchievementStored);
 
-    void updateCachedState(ISteamUserStats* stats, const std::string& achievementId, float progressOverride = -1.0f);
+    bool updateCachedState(ISteamUserStats* stats, const std::string& achievementId, float progressOverride = -1.0f);
 
     using DefinitionMap = std::unordered_map<std::string, AchievementDefinition>;
     std::optional<DefinitionMap> _definitions;
-    AchievementStateMap _states;
+    std::unordered_map<std::string, AchievementState> _states;
+    OnAchievementStateUpdated _onUpdatedCallback;
 };
 
 } // namespace cc::Gs

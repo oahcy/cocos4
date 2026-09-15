@@ -1,5 +1,5 @@
 #include "FriendsSteam.h"
-#include "../../Framework/JsbConversions.h"
+
 
 #include "base/Log.h"
 #include <string>
@@ -8,6 +8,7 @@ namespace cc::Gs {
 
 static bool parseSteamId(const std::string& str, CSteamID& outId) {
     try {
+        if (str.empty() || str.find_first_not_of("0123456789") != std::string::npos) return false;
         outId = CSteamID(std::stoull(str));
         return outId.IsValid();
     } catch (...) {
@@ -42,17 +43,11 @@ static const char* toSteamOverlayDialog(OverlayDialog dialog) {
 }
 
 void FriendsSteam::shutdown() {
-    // Mark shut down FIRST so any re-entrant call from dropped JS callbacks
-    // hits isShutdown() and fails fast instead of touching a torn-down session.
-    Super::shutdown();
     // Unregister Steam callbacks before SteamAPI_Shutdown so their destructors
     // (which may run later, after the session is gone) are safe no-ops.
     _cbAvatarLoaded.Unregister();
     _cbGameJoinRequested.Unregister();
-    // Drop still-pending avatar requests without invoking JS: running user
-    // callbacks inside the teardown stack would be re-entrant, and the TS
-    // lifecycle token has already invalidated every helper, so the JS side can
-    // only log, never act.
+    // The session has already settled pending requests; release backend copies.
     if (!_pendingAvatars.empty()) {
         CC_LOG_WARNING("[Friends] Cancelling %zu pending avatar request(s) during shutdown", _pendingAvatars.size());
         for (auto& pending : _pendingAvatars) {
@@ -65,12 +60,10 @@ void FriendsSteam::shutdown() {
 }
 
 std::string FriendsSteam::getPersonaName() {
-    if (isShutdown()) return "";
     return SteamFriends()->GetPersonaName();
 }
 
 FriendListResult FriendsSteam::getFriends(FriendFlags friendFlags) {
-    if (isShutdown()) return {};
     const int steamFlags = toSteamFriendFlags(friendFlags);
     FriendListResult result;
     int count = SteamFriends()->GetFriendCount(steamFlags);
@@ -108,10 +101,6 @@ AvatarImage FriendsSteam::fetchAvatar(int handle) {
 }
 
 void FriendsSteam::requestAvatar(const AccountId& userId, AvatarSize size, OnAvatarLoaded callback) {
-    if (isShutdown()) {
-        callback.failure("Services shut down");
-        return;
-    }
     CSteamID id;
     if (!parseSteamId(userId, id)) {
         callback.failure("Invalid userId");
@@ -127,45 +116,62 @@ void FriendsSteam::requestAvatar(const AccountId& userId, AvatarSize size, OnAva
 
     if (handle > 0) {
         AvatarImage img = fetchAvatar(handle);
-        callback.success(img);
-    } else if (size == AvatarSize::Large && (handle == 0 || handle == -1)) {
+        if (img.data.empty()) callback.failure("Avatar image read failed");
+        else callback.success(img);
+    } else if (size == AvatarSize::Large && handle == -1) {
         // Prevent memory leak: cap the pending queue to avoid infinite accumulation
         // if the Steam network fails to trigger AvatarImageLoaded_t.
         if (_pendingAvatars.size() >= 50) {
-            CC_LOG_WARNING("[Friends] Avatar request queue is full. Dropping the oldest request.");
-            _pendingAvatars.front().callback.failure("Avatar request timeout or queue full");
-            _pendingAvatars.erase(_pendingAvatars.begin());
+            callback.failure("Avatar request queue full");
+            return;
         }
-        _pendingAvatars.push_back({id, size, std::move(callback)});
+        _pendingAvatars.push_back({id, size, std::move(callback), std::chrono::steady_clock::now() + std::chrono::seconds(30)});
     } else {
         callback.failure("No avatar available");
     }
 }
 
 void FriendsSteam::onAvatarImageLoaded(AvatarImageLoaded_t* pParam) {
+    std::vector<PendingAvatar> completed;
     for (auto it = _pendingAvatars.begin(); it != _pendingAvatars.end(); ) {
         if (it->steamId == pParam->m_steamID) {
-            int handle = 0;
-            switch (it->size) {
-            case AvatarSize::Small:  handle = SteamFriends()->GetSmallFriendAvatar(it->steamId); break;
-            case AvatarSize::Medium: handle = SteamFriends()->GetMediumFriendAvatar(it->steamId); break;
-            case AvatarSize::Large:  handle = SteamFriends()->GetLargeFriendAvatar(it->steamId); break;
-            }
-            if (handle > 0) {
-                AvatarImage img = fetchAvatar(handle);
-                it->callback.success(img);
-            } else {
-                it->callback.failure("Avatar load failed");
-            }
+            completed.push_back(std::move(*it));
             it = _pendingAvatars.erase(it);
         } else {
             ++it;
         }
     }
+    // User callbacks can enqueue more requests. Never hold a queue iterator
+    // while invoking them, and do not consume newly enqueued requests here.
+    for (auto& request : completed) {
+        int handle = 0;
+        switch (request.size) {
+        case AvatarSize::Small:  handle = SteamFriends()->GetSmallFriendAvatar(request.steamId); break;
+        case AvatarSize::Medium: handle = SteamFriends()->GetMediumFriendAvatar(request.steamId); break;
+        case AvatarSize::Large:  handle = SteamFriends()->GetLargeFriendAvatar(request.steamId); break;
+        }
+        if (handle > 0) {
+            AvatarImage img = fetchAvatar(handle);
+            if (img.data.empty()) request.callback.failure("Avatar image read failed");
+            else request.callback.success(img);
+        } else {
+            request.callback.failure("Avatar load failed");
+        }
+    }
+}
+
+void FriendsSteam::expireAvatarRequests(std::chrono::steady_clock::time_point now) {
+    std::vector<OnAvatarLoaded> expired;
+    for (auto it = _pendingAvatars.begin(); it != _pendingAvatars.end();) {
+        if (it->deadline <= now) {
+            expired.push_back(std::move(it->callback));
+            it = _pendingAvatars.erase(it);
+        } else ++it;
+    }
+    for (auto& callback : expired) callback.failure("Avatar request timed out");
 }
 
 FriendsGroupListResult FriendsSteam::getFriendsGroups() {
-    if (isShutdown()) return {};
     FriendsGroupListResult result;
     int groupCount = SteamFriends()->GetFriendsGroupCount();
     for (int i = 0; i < groupCount; i++) {
@@ -191,17 +197,14 @@ FriendsGroupListResult FriendsSteam::getFriendsGroups() {
 }
 
 bool FriendsSteam::setRichPresence(const std::string& key, const std::string& value) {
-    if (isShutdown()) return false;
     return SteamFriends()->SetRichPresence(key.c_str(), value.c_str());
 }
 
 void FriendsSteam::clearRichPresence() {
-    if (isShutdown()) return;
     SteamFriends()->ClearRichPresence();
 }
 
 std::string FriendsSteam::getFriendRichPresence(const AccountId& userId, const std::string& key) {
-    if (isShutdown()) return "";
     CSteamID id;
     if (!parseSteamId(userId, id)) return "";
     const char* val = SteamFriends()->GetFriendRichPresence(id, key.c_str());
@@ -209,7 +212,6 @@ std::string FriendsSteam::getFriendRichPresence(const AccountId& userId, const s
 }
 
 void FriendsSteam::activateGameOverlay(OverlayDialog dialog) {
-    if (isShutdown()) return;
     const char* name = toSteamOverlayDialog(dialog);
     if (!name) {
         CC_LOG_ERROR("[Friends] activateGameOverlay: dialog %d is not supported on Steam", static_cast<int>(dialog));
@@ -219,12 +221,10 @@ void FriendsSteam::activateGameOverlay(OverlayDialog dialog) {
 }
 
 void FriendsSteam::activateGameOverlayToWebPage(const std::string& url) {
-    if (isShutdown()) return;
     SteamFriends()->ActivateGameOverlayToWebPage(url.c_str());
 }
 
 void FriendsSteam::setOnGameRichPresenceJoinRequested(OnGameRichPresenceJoinRequested delegate) {
-    if (isShutdown()) return;
     _gameRichPresenceJoinDelegate = std::move(delegate);
 }
 

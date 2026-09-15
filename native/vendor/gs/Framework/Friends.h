@@ -6,8 +6,11 @@
 #include "commons/GsCallback.h"
 #include "commons/GsTypes.h"
 #include "base/RefCounted.h"
+#include "base/Ptr.h"
 
 namespace cc::Gs {
+
+class GsSession;
 
 // Values must stay in sync with Steam's EPersonaState: FriendsSteam casts the
 // Steam value straight across.
@@ -93,26 +96,25 @@ using OnAvatarLoaded = AsyncCallbackBase;
 using OnAvatarLoaded = AsyncCallback<AvatarImage>;
 #endif
 
-class IFriends : public cc::RefCounted {
+// JSB facade: retains its original session, never the platform implementation.
+class IFriends final : public cc::RefCounted {
 public:
-    virtual ~IFriends() = default;
-
-    virtual std::string getPersonaName() = 0;
-
-    virtual FriendListResult getFriends(FriendFlags friendFlags) = 0;
-
-    virtual void requestAvatar(const AccountId& userId, AvatarSize size, OnAvatarLoaded callback) = 0;
-
-    virtual FriendsGroupListResult getFriendsGroups() = 0;
-
-    virtual bool setRichPresence(const std::string& key, const std::string& value) = 0;
-    virtual void clearRichPresence() = 0;
-    virtual std::string getFriendRichPresence(const AccountId& userId, const std::string& key) = 0;
-
-    virtual void activateGameOverlay(OverlayDialog dialog) = 0;
-    virtual void activateGameOverlayToWebPage(const std::string& url) = 0;
-
-    virtual void setOnGameRichPresenceJoinRequested(OnGameRichPresenceJoinRequested delegate) = 0;
+    ~IFriends() override;
+    std::string getPersonaName();
+    FriendListResult getFriends(FriendFlags friendFlags);
+    void requestAvatar(const AccountId& userId, AvatarSize size, OnAvatarLoaded callback);
+    FriendsGroupListResult getFriendsGroups();
+    bool setRichPresence(const std::string& key, const std::string& value);
+    void clearRichPresence();
+    std::string getFriendRichPresence(const AccountId& userId, const std::string& key);
+    void activateGameOverlay(OverlayDialog dialog);
+    void activateGameOverlayToWebPage(const std::string& url);
+    void setOnGameRichPresenceJoinRequested(OnGameRichPresenceJoinRequested delegate);
+#ifndef SWIG
+    explicit IFriends(cc::IntrusivePtr<GsSession> session);
+private:
+    cc::IntrusivePtr<GsSession> _session;
+#endif
 };
 
 } // namespace cc::Gs

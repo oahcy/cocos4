@@ -32,6 +32,8 @@
 #include "Stats.h"
 #include "commons/GsCallback.h"
 #include "commons/GsTypes.h"
+#include "../common/ScopedListener.h"
+#include "../common/JsUtils.h"
 
 namespace cc::Gs {
 
@@ -69,7 +71,8 @@ inline bool nativevalue_to_se(const AchievementIdsResult& from, se::Value& to, s
 inline bool nativevalue_to_se(const AchievementDefinitionResult& from, se::Value& to, se::Object* ctx) {
     se::HandleObject obj(se::Object::createPlainObject());
     se::Value defVal;
-    nativevalue_to_se(from.Definition, defVal, ctx);
+    if (from.Found) nativevalue_to_se(from.Definition, defVal, ctx);
+    else defVal.setNull();
     obj->setProperty("Definition", defVal);
     to.setObject(obj);
     return true;
@@ -78,7 +81,8 @@ inline bool nativevalue_to_se(const AchievementDefinitionResult& from, se::Value
 inline bool nativevalue_to_se(const AchievementStateResult& from, se::Value& to, se::Object* ctx) {
     se::HandleObject obj(se::Object::createPlainObject());
     se::Value stateVal;
-    nativevalue_to_se(from.State, stateVal, ctx);
+    if (from.Found) nativevalue_to_se(from.State, stateVal, ctx);
+    else stateVal.setNull();
     obj->setProperty("State", stateVal);
     to.setObject(obj);
     return true;
@@ -112,26 +116,22 @@ inline bool sevalue_to_native(const se::Value& from, cc::Gs::AppId* to, se::Obje
     return true;
 }
 
-inline bool sevalue_to_native(const se::Value& from, cc::Gs::AsyncCallbackBase* to, se::Object*) {
-    to->bind(from.isObject() ? from.toObject() : nullptr);
+// Only this adapter layer owns JS handles; callbacks used by backends are native callables.
+template <typename... Args>
+inline bool sevalue_to_native(const se::Value& from, cc::Gs::AsyncCallback<Args...>* to, se::Object*) {
+    if (!from.isObject()) { *to = {}; return true; }
+    scopedListener listener(from.toObject());
+    *to = AsyncCallback<Args...>(
+        [listener](Args... args) { callJSfunc(listener.get(), "onSuccess", args...); },
+        [listener](const std::string& error) { callJSfunc(listener.get(), "onFailure", error); });
     return true;
 }
 
 template <typename... Args>
-inline bool sevalue_to_native(const se::Value& from, cc::Gs::AsyncCallback<Args...>* to, se::Object*) {
-    to->bind(from.isObject() ? from.toObject() : nullptr);
-    return true;
-}
-
-
-inline bool sevalue_to_native(const se::Value& from, cc::Gs::EventDelegateBase* to, se::Object*) {
-    to->bind(from.isObject() ? from.toObject() : nullptr);
-    return true;
-}
-
-template<typename... Args>
 inline bool sevalue_to_native(const se::Value& from, cc::Gs::EventDelegate<Args...>* to, se::Object*) {
-    to->bind(from.isObject() ? from.toObject() : nullptr);
+    if (!from.isObject()) { *to = {}; return true; }
+    scopedListener listener(from.toObject());
+    *to = EventDelegate<Args...>([listener](const Args&... args) { invokeJSfunc(listener.get(), args...); });
     return true;
 }
 
@@ -145,6 +145,7 @@ inline bool nativevalue_to_se(const FileInfo& from, se::Value& to, se::Object*) 
 
 inline bool nativevalue_to_se(const QuotaInfo& from, se::Value& to, se::Object*) {
     se::HandleObject obj(se::Object::createPlainObject());
+    obj->setProperty("Success", se::Value(from.Success));
     obj->setProperty("TotalBytes", se::Value(static_cast<double>(from.TotalBytes)));
     obj->setProperty("AvailableBytes", se::Value(static_cast<double>(from.AvailableBytes)));
     to.setObject(obj);

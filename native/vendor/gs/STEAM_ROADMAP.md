@@ -1,6 +1,6 @@
 # Steam 集成路线图
 
-架构参考：实际的组件注册表设计见 `STEAM_INTEGRATION.md`
+架构参考：模块 Facade + Session 独占 Backend 设计见 `STEAM_INTEGRATION.md`
 （`native/vendor/gs/Framework/commons/*`、`native/vendor/gs/Platform/Steam/*`，TS 辅助层见 `vendor/gs/core/services.ts`）。
 本文档只跟踪能力覆盖范围。
 
@@ -20,14 +20,14 @@
 
 已完成部分的底层实现细节（非独立能力接口）：
 
-- **DLL 延迟加载** -- `SteamGsServices::onPreInitialize()` 中的 `LoadLibraryA` 探测（`Platform/Steam/SteamServicesModule.cpp`）
-- **Tick** -- `GsServicesCommon::init()` 中惰性创建的 `cc::events::Tick` 监听器，每帧驱动 `SteamAPI_RunCallbacks()`
+- **DLL 延迟加载** -- `SteamPlatform::checkDllAvailable()` 中的 `LoadLibraryA` 探测（`Platform/Steam/SteamServicesModule.cpp`）
+- **Tick** -- `jsb_module_register.cpp` 中每个脚本上下文创建的 `cc::events::Tick` 监听器，每帧驱动 `SteamAPI_RunCallbacks()`
 
 目前没有配套的示例项目 -- `STEAM_INTEGRATION.md` 里的用法示例是目前最接近的东西。
 
-实现新能力时遵循现有模式（`Framework/Achievements.h` + `AchievementsCommon.h` +
-`Platform/Steam/AchievementsSteam.h/.cpp` + `vendor/gs/core/services.ts` 中的 `AchievementsHelper`），
-即每个能力是一个独立注册的 `GsComponent`，而不是一个平台专属的全局单例类。
+实现新能力时遵循模块 Facade + Backend 模式（Framework/Achievements.h/.cpp、
+Framework/backends/AchievementsBackend.h、Platform/Steam/AchievementsSteam.h/.cpp、
+TS AchievementsHelper）。由 Session 独占 Backend，对 JS 只暴露模块门面。
 
 ---
 

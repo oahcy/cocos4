@@ -2,14 +2,22 @@
 
 #include "commons/GsCallback.h"
 #include "base/RefCounted.h"
+#include "base/Ptr.h"
 
 namespace cc::Gs {
 
-class IUtils : public cc::RefCounted {
-public:
-    virtual ~IUtils() = default;
+class GsSession;
 
-    virtual void setWarningMessageHook(OnWarningMessage callback) = 0;
+// JSB facade: retains its original session, never the platform implementation.
+class IUtils final : public cc::RefCounted {
+public:
+    ~IUtils() override;
+    void setWarningMessageHook(OnWarningMessage callback);
+#ifndef SWIG
+    explicit IUtils(cc::IntrusivePtr<GsSession> session);
+private:
+    cc::IntrusivePtr<GsSession> _session;
+#endif
 };
 
 } // namespace cc::Gs

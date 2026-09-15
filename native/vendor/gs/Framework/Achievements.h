@@ -5,8 +5,11 @@
 #include <cstdint>
 #include "commons/GsCallback.h"
 #include "base/RefCounted.h"
+#include "base/Ptr.h"
 
 namespace cc::Gs {
+
+class GsSession;
 
 struct AchievementDefinition {
     std::string AchievementId;
@@ -25,27 +28,32 @@ struct AchievementIdsResult {
 };
 
 struct AchievementDefinitionResult {
+    bool Found = false;
     AchievementDefinition Definition;
 };
 
 struct AchievementStateResult {
+    bool Found = false;
     AchievementState State;
 };
 
-class IAchievements : public cc::RefCounted {
+// JSB facade: retains its original session, never the platform implementation.
+class IAchievements final : public cc::RefCounted {
 public:
-    virtual ~IAchievements() = default;
-
-    virtual void queryAchievementDefinitions(OnComplete callback) = 0;
-    virtual void queryAchievementStates(OnComplete callback) = 0;
-    virtual void unlockAchievements(const std::string& achievementId, OnComplete callback) = 0;
-    virtual void clearAchievement(const std::string& achievementId, OnComplete callback) = 0;
-
-    virtual AchievementIdsResult getAchievementIds() = 0;
-    virtual AchievementDefinitionResult getAchievementDefinition(const std::string& achievementId) = 0;
-    virtual AchievementStateResult getAchievementState(const std::string& achievementId) = 0;
-
-    virtual void setOnAchievementStateUpdated(OnAchievementStateUpdated callback) = 0;
+    ~IAchievements() override;
+    void queryAchievementDefinitions(OnComplete callback);
+    void queryAchievementStates(OnComplete callback);
+    void unlockAchievements(const std::string& achievementId, OnComplete callback);
+    void clearAchievement(const std::string& achievementId, OnComplete callback);
+    AchievementIdsResult getAchievementIds();
+    AchievementDefinitionResult getAchievementDefinition(const std::string& achievementId);
+    AchievementStateResult getAchievementState(const std::string& achievementId);
+    void setOnAchievementStateUpdated(OnAchievementStateUpdated callback);
+#ifndef SWIG
+    explicit IAchievements(cc::IntrusivePtr<GsSession> session);
+private:
+    cc::IntrusivePtr<GsSession> _session;
+#endif
 };
 
 } // namespace cc::Gs

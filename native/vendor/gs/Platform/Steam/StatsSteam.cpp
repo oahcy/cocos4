@@ -4,17 +4,7 @@
 
 namespace cc::Gs {
 
-void StatsSteam::shutdown() {
-    // No Steam callbacks or JS listeners to release; the base flag is what makes
-    // post-shutdown calls fail fast.
-    Super::shutdown();
-}
-
 void StatsSteam::setStatInt(const std::string& name, int32_t value, OnComplete callback) {
-    if (isShutdown()) {
-        callback.failure("Services shut down");
-        return;
-    }
     auto* stats = SteamUserStats();
     if (!stats) {
         callback.failure("SteamUserStats interface unavailable");
@@ -28,10 +18,6 @@ void StatsSteam::setStatInt(const std::string& name, int32_t value, OnComplete c
 }
 
 void StatsSteam::setStatFloat(const std::string& name, float value, OnComplete callback) {
-    if (isShutdown()) {
-        callback.failure("Services shut down");
-        return;
-    }
     auto* stats = SteamUserStats();
     if (!stats) {
         callback.failure("SteamUserStats interface unavailable");
@@ -45,7 +31,6 @@ void StatsSteam::setStatFloat(const std::string& name, float value, OnComplete c
 }
 
 StatIntResult StatsSteam::getStatInt(const std::string& name) {
-    if (isShutdown()) return {};
     StatIntResult result;
     auto* stats = SteamUserStats();
     if (!stats) return result;
@@ -58,7 +43,6 @@ StatIntResult StatsSteam::getStatInt(const std::string& name) {
 }
 
 StatFloatResult StatsSteam::getStatFloat(const std::string& name) {
-    if (isShutdown()) return {};
     StatFloatResult result;
     auto* stats = SteamUserStats();
     if (!stats) return result;
@@ -71,10 +55,6 @@ StatFloatResult StatsSteam::getStatFloat(const std::string& name) {
 }
 
 void StatsSteam::storeStats(OnComplete callback) {
-    if (isShutdown()) {
-        callback.failure("Services shut down");
-        return;
-    }
     auto* stats = SteamUserStats();
     if (!stats) {
         callback.failure("SteamUserStats interface unavailable");
@@ -88,11 +68,11 @@ void StatsSteam::storeStats(OnComplete callback) {
 }
 
 bool StatsSteam::resetAllStats(bool achievementsToo) {
-    if (isShutdown()) return false;
     auto* stats = SteamUserStats();
     if (!stats) return false;
     bool ok = stats->ResetAllStats(achievementsToo);
     if (ok) {
+        if (achievementsToo && _invalidateAchievements) _invalidateAchievements();
         CC_LOG_INFO("[Steam] ResetAllStats(achievementsToo=%d) OK", achievementsToo);
     }
     return ok;

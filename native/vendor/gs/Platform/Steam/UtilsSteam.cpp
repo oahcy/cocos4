@@ -21,11 +21,9 @@ void UtilsSteam::shutdown() {
     if (utils) {
         utils->SetWarningMessageHook(nullptr);
     }
-    Super::shutdown();
 }
 
 void UtilsSteam::setWarningMessageHook(OnWarningMessage callback) {
-    if (isShutdown()) return;
     s_callback = std::move(callback);
     auto* utils = SteamUtils();
     if (utils) {

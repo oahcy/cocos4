@@ -43,29 +43,25 @@ export interface AchievementState {
 }
 
 // ────────────────────────────────────────────────────
-// Lifecycle guard — shared by the services instance and
-// every helper it hands out, so destroying the instance
-// invalidates even copies of a helper the user kept.
+// All helpers consult their original native session; JS has no second lifecycle state.
 // ────────────────────────────────────────────────────
 
 class ServicesLifecycle {
-    private _destroyed = false;
+    constructor (private readonly native: { isClosed(): boolean; isClosing(): boolean }) {}
 
-    markDestroyed (): void {
-        this._destroyed = true;
+    isClosed (): boolean {
+        return this.native.isClosed() || this.native.isClosing();
     }
 
     assertAlive (who: string): void {
-        if (this._destroyed) {
-            throw new Error(`[gs] ${who} has been destroyed. Do not keep using it after GsServicesHelper.destroy() — fetch a fresh services instance via createServices()`);
+        if (this.isClosed()) {
+            throw new Error(`[gs] ${who} has been destroyed. Fetch a fresh services instance via getServices().`);
         }
     }
 }
 
-// Base class for the interface wrappers below. Each wrapper is a thin,
-// transparent pipe over one native interface; the lifecycle token makes sure a
-// pipe that outlives its services fails loudly instead of forwarding to a
-// shut-down native object.
+// JS helpers wrap module facades. All checks consult the original native session,
+// including when the engine (rather than JS) initiates shutdown.
 class GsHelperBase {
     protected readonly _native: any;
     private readonly _lifecycle: ServicesLifecycle;
@@ -260,7 +256,9 @@ export class RemoteStorageHelper extends GsHelperBase {
 
     getQuota (): QuotaInfo {
         this.assertAlive();
-        return this._native.getQuota();
+        const result = this._native.getQuota();
+        if (!result || !result.Success) throw new Error('Failed to query storage quota');
+        return { TotalBytes: result.TotalBytes, AvailableBytes: result.AvailableBytes };
     }
 }
 
@@ -484,16 +482,16 @@ export class FriendsHelper extends GsHelperBase {
 
 export class GsServicesHelper {
     private _native: any;
-    private _lifecycle = new ServicesLifecycle();
+    private _lifecycle: ServicesLifecycle;
     private _achievements: AchievementsHelper | null = null;
     private _friends: FriendsHelper | null = null;
     private _remoteStorage: RemoteStorageHelper | null = null;
     private _stats: StatsHelper | null = null;
     private _utils: UtilsHelper | null = null;
-    private _initialized = false;
 
     constructor (native: any) {
         this._native = native;
+        this._lifecycle = new ServicesLifecycle(native);
     }
 
     private assertAlive (): void {
@@ -507,25 +505,18 @@ export class GsServicesHelper {
 
     init (): boolean {
         this.assertAlive();
-        if (this._initialized) {
-            console.warn('[gs] GsServicesHelper is already initialized. Skipping duplicate init().');
-            return true;
-        }
-        const result = this._native.init();
-        if (result) {
-            this._initialized = true;
-        }
-        return result;
+        return this._native.init();
+    }
+
+    /** @internal Used to discard a cached wrapper closed by native lifecycle cleanup. */
+    _isClosed (): boolean {
+        return this._lifecycle.isClosed();
     }
 
     destroy (): void {
-        // Flip the shared lifecycle first so every handed-out helper (even copies
-        // the user kept) starts throwing immediately.
-        this._lifecycle.markDestroyed();
-        
-        // Proactively unregister any active callbacks from the native layer
-        // before destroying the native object to prevent dangling callbacks
-        // firing into destroyed JS references.
+        // Native session state is authoritative, including closes initiated by the engine.
+        // It rejects new calls immediately and defers backend deletion during dispatch.
+        this._native.destroy();
         if (this._achievements) {
             this._achievements._unbindAllEvents();
         }
@@ -536,18 +527,16 @@ export class GsServicesHelper {
             this._friends._unbindAllEvents();
         }
 
-        this._native.destroy();
         this._achievements = null;
         this._friends = null;
         this._remoteStorage = null;
         this._stats = null;
         this._utils = null;
-        this._initialized = false;
         
         // Remove from cache to allow recreation later
-        for (const key in _servicesCache) {
-            if (_servicesCache[key] === this) {
-                delete _servicesCache[key];
+        for (const [provider, services] of _servicesCache) {
+            if (services === this) {
+                _servicesCache.delete(provider);
                 break;
             }
         }
@@ -628,28 +617,25 @@ export class GsServicesHelper {
 // Factory — wraps jsb.getServices()
 // ────────────────────────────────────────────────────
 
-const _servicesCache: Record<string, GsServicesHelper> = {};
+const _servicesCache = new Map<number, GsServicesHelper>();
 
 export function createServices (
     servicesType: number = jsb.GsServicesType.Steam,
-    instanceName: string = '',
-    instanceConfigName: string = '',
 ): GsServicesHelper | null {
-    // Generate a unique cache key based on the parameters
-    const cacheKey = `${servicesType}_${instanceName}_${instanceConfigName}`;
-
-    if (_servicesCache[cacheKey]) {
-        return _servicesCache[cacheKey];
+    const cached = _servicesCache.get(servicesType);
+    if (cached && !cached._isClosed()) {
+        return cached;
     }
+    _servicesCache.delete(servicesType);
 
-    const native = jsb.IGsServices.getServices(servicesType, instanceName, instanceConfigName);
+    const native = jsb.IGsServices.getServices(servicesType);
     if (!native) {
         console.warn(`[gs] getServices failed for type ${servicesType}, no factory registered or creation failed`);
         return null;
     }
     
     const helper = new GsServicesHelper(native);
-    _servicesCache[cacheKey] = helper;
+    _servicesCache.set(servicesType, helper);
     
     return helper;
 }

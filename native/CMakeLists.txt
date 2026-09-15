@@ -857,17 +857,27 @@ cocos_source_files(
     vendor/gs/common/JsUtils.h
     vendor/gs/common/ScopedListener.cpp
     vendor/gs/common/ScopedListener.h
+    vendor/gs/Framework/GsSession.cpp
+    vendor/gs/Framework/commons/GsSession.h
+    vendor/gs/Framework/backends/GsBackend.h
+    vendor/gs/Framework/Achievements.cpp
+    vendor/gs/Framework/backends/AchievementsBackend.h
+    vendor/gs/Framework/Friends.cpp
+    vendor/gs/Framework/backends/FriendsBackend.h
+    vendor/gs/Framework/RemoteStorage.cpp
+    vendor/gs/Framework/backends/RemoteStorageBackend.h
+    vendor/gs/Framework/Stats.cpp
+    vendor/gs/Framework/backends/StatsBackend.h
+    vendor/gs/Framework/Utils.cpp
+    vendor/gs/Framework/backends/UtilsBackend.h
     vendor/gs/Framework/GsServicesCommon.cpp
     vendor/gs/Framework/Achievements.h
-    vendor/gs/Framework/AchievementsCommon.h
     vendor/gs/Framework/Friends.h
     vendor/gs/Framework/JsbConversions.h
     vendor/gs/Framework/RemoteStorage.h
     vendor/gs/Framework/Stats.h
     vendor/gs/Framework/Utils.h
     vendor/gs/Framework/commons/GsCallback.h
-    vendor/gs/Framework/commons/GsComponentRegistry.h
-    vendor/gs/Framework/commons/GsComponent.h
     vendor/gs/Framework/commons/GsServices.h
     vendor/gs/Framework/commons/GsServicesCommon.h
     vendor/gs/Framework/commons/GsServicesRegistry.h

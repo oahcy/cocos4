@@ -144,6 +144,8 @@
 
 #if CC_USE_VENDOR_GS
     #include "cocos/bindings/auto/jsb_gs_auto.h"
+    #include "vendor/gs/Framework/commons/GsServicesRegistry.h"
+    #include "engine/EngineEvents.h"
 
     #if CC_USE_VENDOR_STEAM
         #include "vendor/gs/Platform/Steam/SteamServicesModule.h"
@@ -153,6 +155,15 @@
 bool jsb_register_all_modules() {
     se::ScriptEngine *se = se::ScriptEngine::getInstance();
 
+#if CC_USE_VENDOR_GS
+    // A script-context driver, independent of any individual service lifetime.
+    // Closing a service inside its callback does not destroy the active Tick listener.
+    auto gsTick = std::make_shared<cc::events::Tick::Listener>();
+    gsTick->bind([](float dt) { cc::Gs::GsServicesRegistry::get().tick(dt); });
+    se->addBeforeCleanupHook([gsTick]() {
+        cc::Gs::GsServicesRegistry::get().destroyServices();
+    });
+#endif
     se->addBeforeCleanupHook([se]() {
 #if (CC_PLATFORM == CC_PLATFORM_IOS || CC_PLATFORM == CC_PLATFORM_MACOS || CC_PLATFORM == CC_PLATFORM_ANDROID || CC_PLATFORM == CC_PLATFORM_OHOS)
         // REMOVED: se->garbageCollect()
@@ -242,8 +253,7 @@ bool jsb_register_all_modules() {
     se->addRegisterCallback(register_all_gs);
 
     #if CC_USE_VENDOR_STEAM
-    static cc::Gs::SteamModuleInitializer s_steamModuleInit;
-    cc::Gs::GsServicesRegistry::get().addModuleInitializer(cc::Gs::GsServicesType::Steam, &s_steamModuleInit);
+    cc::Gs::GsServicesRegistry::get().registerProvider(cc::Gs::GsServicesType::Steam, cc::Gs::createSteamServices);
     #endif
 
 #endif // CC_USE_VENDOR_GS

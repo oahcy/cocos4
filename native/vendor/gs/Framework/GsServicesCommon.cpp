@@ -24,46 +24,51 @@
 
 #include "commons/GsServicesCommon.h"
 #include "commons/GsServicesRegistry.h"
-#include "Achievements.h"
-#include "Friends.h"
-#include "RemoteStorage.h"
-#include "Stats.h"
-#include "Utils.h"
-
-#include "base/Ptr.h"
 
 namespace cc::Gs {
 
-GsServicesCommon::~GsServicesCommon() = default;
-
-cc::IntrusivePtr<IGsServices> IGsServices::getServices(
-    GsServicesType servicesType,
-    const std::string& instanceName,
-    const std::string& instanceConfigName)
-{
-    GsServicesRegistry::get().ensureInitialized();
-    return GsServicesRegistry::get().getNamedServicesInstance(
-        servicesType, instanceName, instanceConfigName);
+IntrusivePtr<IGsServices> IGsServices::getServices(GsServicesType provider) {
+    return GsServicesRegistry::get().getServicesInstance(provider);
 }
 
+GsServicesCommon::GsServicesCommon(GsServicesType provider, std::unique_ptr<GsPlatform> platform)
+    : _provider(provider), _session(new GsSession(std::move(platform))) {}
+GsServicesCommon::~GsServicesCommon() { _session->close(); }
+bool GsServicesCommon::init() { return _session->init(); }
+void GsServicesCommon::destroy() { _session->close(); }
+void GsServicesCommon::tick(float dt) { _session->tick(dt); }
+bool GsServicesCommon::isClosed() const { return _session->isClosed(); }
+bool GsServicesCommon::isClosing() const { return _session->isClosing(); }
+bool GsServicesCommon::restartAppIfNecessary(const AppId& appId) { return _session->restartAppIfNecessary(appId); }
+
 IntrusivePtr<IAchievements> GsServicesCommon::getAchievementsInterface() {
-    return get<IAchievements>();
+    if (!_session->achievements()) return nullptr;
+    if (!_achievements) _achievements = new IAchievements(_session);
+    return _achievements;
 }
 
 IntrusivePtr<IFriends> GsServicesCommon::getFriendsInterface() {
-    return get<IFriends>();
+    if (!_session->friends()) return nullptr;
+    if (!_friends) _friends = new IFriends(_session);
+    return _friends;
 }
 
 IntrusivePtr<IRemoteStorage> GsServicesCommon::getRemoteStorageInterface() {
-    return get<IRemoteStorage>();
+    if (!_session->remoteStorage()) return nullptr;
+    if (!_remoteStorage) _remoteStorage = new IRemoteStorage(_session);
+    return _remoteStorage;
 }
 
 IntrusivePtr<IStats> GsServicesCommon::getStatsInterface() {
-    return get<IStats>();
+    if (!_session->stats()) return nullptr;
+    if (!_stats) _stats = new IStats(_session);
+    return _stats;
 }
 
 IntrusivePtr<IUtils> GsServicesCommon::getUtilsInterface() {
-    return get<IUtils>();
+    if (!_session->utils()) return nullptr;
+    if (!_utils) _utils = new IUtils(_session);
+    return _utils;
 }
 
 } // namespace cc::Gs

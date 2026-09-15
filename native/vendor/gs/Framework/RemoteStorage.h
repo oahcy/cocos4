@@ -29,8 +29,11 @@
 #include <vector>
 #include "commons/GsCallback.h"
 #include "base/RefCounted.h"
+#include "base/Ptr.h"
 
 namespace cc::Gs {
+
+class GsSession;
 
 struct FileInfo {
     std::string FileName;
@@ -38,6 +41,7 @@ struct FileInfo {
 };
 
 struct QuotaInfo {
+    bool Success = false;
     uint64_t TotalBytes = 0;
     uint64_t AvailableBytes = 0;
 };
@@ -46,20 +50,23 @@ struct FileList {
     std::vector<FileInfo> Files;
 };
 
-class IRemoteStorage : public cc::RefCounted {
+// JSB facade: retains its original session, never the platform implementation.
+class IRemoteStorage final : public cc::RefCounted {
 public:
-    virtual ~IRemoteStorage() = default;
-
-    virtual void writeFile(const std::string& fileName, const std::string& data, OnComplete callback) = 0;
-    virtual void readFile(const std::string& fileName, OnReadFile callback) = 0;
-    virtual void deleteFile(const std::string& fileName, OnComplete callback) = 0;
-
-    virtual bool fileExists(const std::string& fileName) = 0;
-    virtual int32_t getFileSize(const std::string& fileName) = 0;
-    virtual int32_t getFileCount() = 0;
-    virtual FileList getFileList() = 0;
-
-    virtual QuotaInfo getQuota() = 0;
+    ~IRemoteStorage() override;
+    void writeFile(const std::string& fileName, const std::string& data, OnComplete callback);
+    void readFile(const std::string& fileName, OnReadFile callback);
+    void deleteFile(const std::string& fileName, OnComplete callback);
+    bool fileExists(const std::string& fileName);
+    int32_t getFileSize(const std::string& fileName);
+    int32_t getFileCount();
+    FileList getFileList();
+    QuotaInfo getQuota();
+#ifndef SWIG
+    explicit IRemoteStorage(cc::IntrusivePtr<GsSession> session);
+private:
+    cc::IntrusivePtr<GsSession> _session;
+#endif
 };
 
 } // namespace cc::Gs

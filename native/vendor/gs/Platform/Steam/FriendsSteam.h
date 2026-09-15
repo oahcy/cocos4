@@ -1,21 +1,19 @@
 #pragma once
 
 #include <steam_api.h>
-#include "../../Framework/Friends.h"
-#include "../../Framework/commons/GsComponent.h"
+#include <chrono>
+#include "../../Framework/backends/FriendsBackend.h"
 
 namespace cc::Gs {
 
-class FriendsSteam : public GsComponent<IFriends> {
+class FriendsSteam : public IFriendsBackend {
 public:
-    using Super = GsComponent<IFriends>;
-
-    explicit FriendsSteam(GsServicesCommon& inServices)
-        : Super(inServices)
-        , _cbAvatarLoaded(this, &FriendsSteam::onAvatarImageLoaded)
+    FriendsSteam()
+        : _cbAvatarLoaded(this, &FriendsSteam::onAvatarImageLoaded)
         , _cbGameJoinRequested(this, &FriendsSteam::onGameRichPresenceJoinRequested) {}
 
     void shutdown() override;
+    void expireAvatarRequests(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
 
     std::string getPersonaName() override;
 
@@ -44,6 +42,7 @@ private:
         CSteamID steamId;
         AvatarSize size;
         OnAvatarLoaded callback;
+        std::chrono::steady_clock::time_point deadline;
     };
     std::vector<PendingAvatar> _pendingAvatars;
     OnGameRichPresenceJoinRequested _gameRichPresenceJoinDelegate;
