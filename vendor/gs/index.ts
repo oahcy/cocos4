@@ -25,17 +25,20 @@
 
 import './core/enums';
 
-import type { OnSuccessListener } from './core/callback';
-import type { OnReadFileListener } from './core/callback';
-
 export declare namespace gs {
+    /** Stable error codes shared by service operations. */
+    export enum GsErrorCode {
+        NotSupported = 0, NotReady = 1, NotFound = 2, InvalidArgument = 3,
+        Busy = 4, Cancelled = 5, Timeout = 6, PlatformError = 7,
+    }
 
-    // ────────────────────────────────────────────────────
-    // Callback / listener interfaces re-exported for users
-    // ────────────────────────────────────────────────────
+    export class GsError extends Error {
+        readonly code: GsErrorCode;
+        readonly provider: ServicesProvider;
+        readonly platformCode: string | null;
+        constructor(code: GsErrorCode, message: string, provider: ServicesProvider, platformCode?: string | null);
+    }
 
-    export type OnSuccessListener = import('./core/callback').OnSuccessListener;
-    export type OnReadFileListener = import('./core/callback').OnReadFileListener;
 
     // ────────────────────────────────────────────────────
     // Enums
@@ -47,8 +50,8 @@ export declare namespace gs {
      */
     export enum ServicesProvider {
         /**
-         * @en Null provider (no-op).
-         * @zh 空提供商（无操作）。
+         * @en No provider; getServices returns null.
+         * @zh 未指定提供商，getServices 返回 null。
          */
         Null = 0,
         /**
@@ -71,106 +74,27 @@ export declare namespace gs {
     // Data types
     // ────────────────────────────────────────────────────
 
-    /**
-     * @en Persona online state.
-     * @zh 用户在线状态。
-     */
-    export enum PersonaState {
-        Offline = 0,
-        Online,
-        Busy,
-        Away,
-        Snooze,
-        LookingToTrade,
-        LookingToPlay,
-        Invisible,
-    }
+    /** Provider-independent observed presence; Unknown means unavailable. */
+    export enum PresenceState { Unknown = 0, Offline, Online, Away, Busy }
+    /** Preferred size; providers may return the closest available resolution. */
+    export enum AvatarSize { Small = 0, Medium, Large }
+    /** Optional overlay pages. Unsupported pages reject with NotSupported. */
+    export enum OverlayDialog { Friends = 0, Community, Players, Settings, OfficialGameGroup, Stats, Achievements }
 
-    /**
-     * @en Avatar image size.
-     * @zh 头像尺寸。
-     */
-    export enum AvatarSize {
-        Small = 0,
-        Medium,
-        Large,
+    /** IDs are opaque strings scoped to the current provider. */
+    export interface UserProfile { userId: string; displayName: string; }
+    export interface FriendInfo extends UserProfile {
+        /** Current user's nickname for this friend; null when absent or unavailable. */
+        nickname: string | null;
+        presence: PresenceState;
     }
-
-    /**
-     * @en Friend filter bit flags for getFriends(). Combine with `|`.
-     *     Each platform maps these onto its own native constants.
-     * @zh getFriends() 的好友筛选位标志，可用 `|` 组合。
-     *     各平台内部映射到自己的原生常量。
-     */
-    export enum FriendFlags {
-        None = 0,
-        /**
-         * @en Confirmed friends.
-         * @zh 已确认的好友。
-         */
-        Immediate = 1,
-        Blocked = 2,
-        /**
-         * @en Incoming friend request.
-         * @zh 收到的好友请求。
-         */
-        FriendshipRequested = 4,
-        /**
-         * @en Outgoing friend request.
-         * @zh 发出的好友请求。
-         */
-        RequestingFriendship = 8,
-        ClanMember = 16,
-        OnGameServer = 32,
-        All = 0xFFFFFFFF,
-    }
-
-    /**
-     * @en Platform overlay page for activateGameOverlay(). Not every platform
-     *     supports every page; unsupported values are rejected by the native
-     *     implementation with an error log.
-     * @zh activateGameOverlay() 可打开的平台 Overlay 页面。并非所有平台都支持
-     *     全部页面，不支持的值会被原生实现拒绝并记录错误日志。
-     */
-    export enum OverlayDialog {
-        Friends = 0,
-        Community,
-        Players,
-        Settings,
-        OfficialGameGroup,
-        Stats,
-        Achievements,
-    }
-
-    /**
-     * @en Friend info returned by getFriends().
-     * @zh getFriends() 返回的好友信息。
-     */
-    export interface FriendInfo {
+    /** Independent RGBA8 pixels, tightly packed; data.length = width * height * 4. */
+    export interface AvatarImage { width: number; height: number; data: Uint8Array; }
+    export interface FriendGroup { id: string; displayName: string; memberIds: string[]; }
+    export interface JoinRequest {
         userId: string;
-        personaName: string;
-        nickname: string;
-        personaState: PersonaState;
-    }
-
-    /**
-     * @en Avatar image with RGBA pixel data.
-     * @zh 头像图片，包含 RGBA 像素数据。
-     */
-    export interface AvatarImage {
-        width: number;
-        height: number;
-        data: ArrayBuffer;
-    }
-
-    /**
-     * @en Friends group info.
-     * @zh 好友分组信息。
-     */
-    export interface FriendsGroupInfo {
-        groupId: number;
-        groupName: string;
-        members: string[];
+        /** Opaque connection data defined by the game. */
+        connectionString: string;
     }
 
     /**
@@ -178,9 +102,9 @@ export declare namespace gs {
      * @zh 成就定义数据。
      */
     export interface AchievementDefinition {
-        AchievementId: string;
-        DisplayName: string;
-        Description: string;
+        id: string;
+        displayName: string;
+        description: string;
     }
 
     /**
@@ -188,18 +112,21 @@ export declare namespace gs {
      * @zh 成就状态数据。
      */
     export interface AchievementState {
-        AchievementId: string;
-        Progress: number;
-        UnlockTimeSec: number;
+        id: string;
+        unlocked: boolean;
+        /** Percentage in [0, 100], or null when unknown. */
+        progress: number | null;
+        /** Unix seconds; null when locked or the time is unknown. */
+        unlockedAt: number | null;
     }
 
     /**
-     * @en File info returned by getFileList().
-     * @zh getFileList() 返回的文件信息。
+     * @en File info returned by listFiles().
+     * @zh listFiles() 返回的文件信息。
      */
     export interface FileInfo {
-        FileName: string;
-        FileSize: number;
+        name: string;
+        size: number;
     }
 
     /**
@@ -207,26 +134,13 @@ export declare namespace gs {
      * @zh 云存储配额信息。
      */
     export interface QuotaInfo {
-        TotalBytes: number;
-        AvailableBytes: number;
+        totalBytes: number;
+        availableBytes: number;
     }
 
-    /**
-     * @en Stat integer result.
-     * @zh 整数统计结果。
-     */
-    export interface StatIntResult {
-        Success: boolean;
-        Value: number;
-    }
-
-    /**
-     * @en Stat float result.
-     * @zh 浮点统计结果。
-     */
-    export interface StatFloatResult {
-        Success: boolean;
-        Value: number;
+    export interface ResetStatsOptions {
+        /** Defaults to false. Only set true to reset achievements together with stats. */
+        includeAchievements?: boolean;
     }
 
     // ────────────────────────────────────────────────────
@@ -254,90 +168,38 @@ export declare namespace gs {
      * @en Game services instance providing lifecycle management and sub-interface access.
      * @zh 游戏服务实例，提供生命周期管理和子接口访问。
      */
+    export enum ServicesState { Created = 0, Ready, Closing, Closed }
+    export enum ServicesModule { Achievements = 0, Friends, RemoteStorage, Stats, Utils }
+
     export class Services {
-        /**
-         * @en Check if the app needs to be restarted through the platform launcher
-         *     (e.g. the Steam client). Must be called BEFORE init().
-         *     appId must be your published App ID, hardcoded into the shipped build —
-         *     never sourced from a plain-text/user-editable file. (On Steam, the
-         *     dev-only `steam_appid.txt` convenience file must NOT ship in the release
-         *     build; it exists solely so `SteamAPI_InitEx()` can find an App ID when
-         *     you run the exe directly without going through the Steam client.)
-         *     Returns true: the launcher already relaunched the process correctly;
-         *     quit immediately without calling init().
-         *     Returns false: already running under the launcher (e.g. Steam sets the
-         *     SteamAppId/SteamGameId environment variables before launching the game),
-         *     so init() can proceed directly — init() itself takes no App ID.
-         * @zh 检查应用是否需要通过平台启动器（如 Steam 客户端）重新启动。
-         *     必须在 init() 之前调用。
-         *     appId 必须是烧进发行包的真实已发布 App ID —— 绝不能来自纯文本、可被玩家
-         *     修改的文件。（Steam 平台上，仅用于开发调试的 `steam_appid.txt` 文件不应
-         *     出现在发行包中；它的作用只是让直接双击运行 exe 时 `SteamAPI_InitEx()`
-         *     也能找到一个 App ID，绕过 Steam 客户端启动。）
-         *     返回 true：启动器已经重新正确拉起了进程，应立即退出，不要调用 init()。
-         *     返回 false：当前进程已经在启动器环境下运行（例如 Steam 客户端在拉起游戏
-         *     前已设置好 SteamAppId/SteamGameId 环境变量），可以直接调用 init() ——
-         *     init() 本身不需要也不接收 App ID 参数。
-         *     Steam 请传入 number；string 留给未来非数字型 ID 的平台（如 Epic 的
-         *     Product/Sandbox ID）—— Steam 不支持字符串，传入会失败并记录错误日志。
-         * @param appId - Your published platform App ID (e.g. Steam AppID from Steamworks), hardcoded in the shipped build.
-         *     Pass a number for Steam; string is reserved for future non-numeric
-         *     platform IDs (e.g. Epic Online Services' Product/Sandbox ID) —
-         *     Steam does not support a string and will fail with a logged error.
+        /** Optional launcher check, only before init(). True means relaunch was requested:
+         * exit the current process. False means no relaunch was requested; it does not prove
+         * authentication or online connectivity. Failure rejects GsError, unsupported providers
+         * reject NotSupported. Steam requires a positive uint32 App ID; other providers may
+         * accept a string. Use the app's configured published ID.
          */
-        restartAppIfNecessary (appId: number | string): boolean;
-
-        /**
-         * @en Initialize the services instance. Must be called after restartAppIfNecessary check.
-         * @zh 初始化服务实例。必须在 restartAppIfNecessary 检查之后调用。
-         * @returns true if initialization succeeded.
+        restartAppIfNecessary (appId: number | string): Promise<boolean>;
+        /** Initializes the SDK session. Repeated calls when Ready succeed.
+         * Failure rejects GsError and leaves Created for retry; a closed session cannot reopen.
+         * Ready does not imply online connectivity, user authentication, or synchronized data.
+         * This API allows asynchronous completion; Steam currently initializes synchronously.
          */
-        init (): boolean;
-
-        /**
-         * @en Destroy the services instance and release resources.
-         *     This session is permanently closed. Fetch a new instance with getServices().
-         *     Pending requests reject; calls during event dispatch defer resource release until dispatch ends.
-         * @zh 销毁服务实例并释放资源。
-         *     当前会话永久关闭，需通过 getServices() 获取新实例。未完成请求会失败；
-         *     在事件回调中关闭时，资源释放会延后到当前调用结束。
+        init (): Promise<void>;
+        /** Native session snapshot; readable after shutdown. */
+        getState (): ServicesState;
+        /** Available modules in this initialized session. NotReady before init, Cancelled after close.
+         * A present module may still reject optional operations with NotSupported.
          */
+        hasModule (module: ServicesModule): boolean;
+        /** Idempotent close. Cancels pending operations; callback dispatch may defer resource release. */
         destroy (): void;
-
-        /**
-         * @en Returns the active provider type.
-         * @zh 返回当前激活的提供商类型。
-         */
+        /** Provider identity, also readable after shutdown. */
         getServicesProvider (): ServicesProvider;
-
-        /**
-         * @en Returns the achievements sub-interface.
-         * @zh 返回成就子接口。
-         */
+        /** Module getters throw NotReady before init, NotSupported for an absent module, Cancelled after close. */
         achievements (): Achievements;
-
-        /**
-         * @en Returns the friends sub-interface.
-         * @zh 返回好友子接口。
-         */
         friends (): Friends;
-
-        /**
-         * @en Returns the remote storage sub-interface.
-         * @zh 返回云存储子接口。
-         */
         remoteStorage (): RemoteStorage;
-
-        /**
-         * @en Returns the stats sub-interface.
-         * @zh 返回统计子接口。
-         */
         stats (): Stats;
-
-        /**
-         * @en Returns the utils sub-interface.
-         * @zh 返回工具子接口。
-         */
         utils (): Utils;
     }
 
@@ -350,58 +212,26 @@ export declare namespace gs {
      * @zh 提供平台成就的访问（查询、解锁、状态）。
      */
     export class Achievements {
+        /** Returns a fresh snapshot of definitions. No prior query is required. */
+        queryDefinitions (): Promise<AchievementDefinition[]>;
+        /** Returns a fresh snapshot of current-user states, independently of definitions. */
+        queryStates (): Promise<AchievementState[]>;
         /**
-         * @en Query achievement definitions from the platform. Results cached locally.
-         * @zh 从平台查询成就定义。结果缓存在本地。
+         * Requests an unlock. Resolves when the platform accepts the change and submission.
+         * Does not guarantee server persistence. A rejected submission may follow a local change.
+         * Rejects with GsError; an unknown ID is NotFound.
          */
-        queryAchievementDefinitions (): Promise<void>;
-
+        unlock (id: string): Promise<void>;
         /**
-         * @en Query achievement states for the current account. Results cached locally.
-         * @zh 查询当前账号的成就状态。结果缓存在本地。
+         * Optional reset operation; rejects with NotSupported if unavailable.
+         * Has the same completion boundary as unlock. Query states again to refresh the UI.
          */
-        queryAchievementStates (): Promise<void>;
-
+        clearAchievement (id: string): Promise<void>;
         /**
-         * @en Unlock an achievement. Calls storeStats internally.
-         * @zh 解锁成就。内部调用 storeStats。
-         * @param achievementId - The achievement API name.
+         * Reports observed state changes, not submission acknowledgements.
+         * Returns an unsubscribe function. A fresh query may be needed after local resets.
          */
-        unlockAchievements (achievementId: string): Promise<void>;
-
-        /**
-         * @en Clear an achievement (reset to locked).
-         * @zh 清除成就（重置为未解锁）。
-         * @param achievementId - The achievement API name.
-         */
-        clearAchievement (achievementId: string): Promise<void>;
-
-        /**
-         * @en Returns all cached achievement IDs (call queryAchievementDefinitions first).
-         * @zh 返回所有缓存的成就 ID（需先调用 queryAchievementDefinitions）。
-         */
-        getAchievementIds (): string[];
-
-        /**
-         * @en Returns a cached achievement definition.
-         * @zh 返回缓存的成就定义。
-         * @param achievementId - The achievement API name.
-         */
-        getAchievementDefinition (achievementId: string): AchievementDefinition | null;
-
-        /**
-         * @en Returns a cached achievement state.
-         * @zh 返回缓存的成就状态。
-         * @param achievementId - The achievement API name.
-         */
-        getAchievementState (achievementId: string): AchievementState | null;
-
-        /**
-         * @en Registers a callback for achievement state updates (unlock, progress change).
-         * @zh 注册成就状态更新的回调（解锁、进度变化）。
-         * @returns A function to unregister this specific callback.
-         */
-        onAchievementStateUpdated (callback: (achievementId: string, progress: number, unlockTimeSec: number) => void): () => void;
+        onUpdated (callback: (state: AchievementState) => void): () => void;
     }
 
     // ────────────────────────────────────────────────────
@@ -413,71 +243,30 @@ export declare namespace gs {
      * @zh 提供平台好友功能的访问（列表、头像、分组、Rich Presence、Overlay、邀请）。
      */
     export class Friends {
-        /**
-         * @en Returns the current user's persona name.
-         * @zh 返回当前用户的昵称。
+        /** Current session user. Rejects NotReady if no user is available. */
+        getLocalUser (): Promise<UserProfile>;
+        /** Snapshot of confirmed friends. Empty lists are []; presence may be Unknown. */
+        getFriends (): Promise<FriendInfo[]>;
+        /** Null when no avatar is available. Size defaults to Medium; failures reject GsError. */
+        getAvatar (userId: string, size?: AvatarSize): Promise<AvatarImage | null>;
+        /** Optional friend grouping capability; unsupported providers reject NotSupported. */
+        getGroups (): Promise<FriendGroup[]>;
+        /** Optional capability. Resolves when the platform accepts the update, not remote delivery.
+         * Keys and values are platform-defined; an empty value removes the key.
          */
-        getPersonaName (): string;
-
-        /**
-         * @en Returns the friend list filtered by flags.
-         * @zh 按标志过滤返回好友列表。
-         * @param friendFlags - Bitmask of FriendFlags (e.g. FriendFlags.Immediate).
+        setRichPresence (key: string, value: string): Promise<void>;
+        /** Clears current-user presence data; same completion boundary as setRichPresence. */
+        clearRichPresence (): Promise<void>;
+        /** Optional capability. Currently known value, or null when absent/unknown.
+         * Does not guarantee a network refresh; Steam reads its local presence cache.
          */
-        getFriends (friendFlags: FriendFlags): FriendInfo[];
-
-        /**
-         * @en Request a friend's avatar image.
-         * @zh 请求好友头像图片。
-         * @param userId - The user's ID string.
-         * @param size - Avatar size (Small/Medium/Large).
-         */
-        requestAvatar (userId: string, size: AvatarSize): Promise<AvatarImage>;
-
-        /**
-         * @en Returns all friends groups (tags).
-         * @zh 返回所有好友分组（标签）。
-         */
-        getFriendsGroups (): FriendsGroupInfo[];
-
-        /**
-         * @en Set a rich presence key-value pair.
-         * @zh 设置 Rich Presence 键值对。
-         */
-        setRichPresence (key: string, value: string): boolean;
-
-        /**
-         * @en Clear all rich presence data.
-         * @zh 清除所有 Rich Presence 数据。
-         */
-        clearRichPresence (): void;
-
-        /**
-         * @en Get a friend's rich presence value by key.
-         * @zh 通过 key 获取好友的 Rich Presence 值。
-         */
-        getFriendRichPresence (userId: string, key: string): string;
-
-        /**
-         * @en Activate the platform overlay to a specific page.
-         * @zh 打开平台叠加层到指定页面。
-         * @param dialog - Which overlay page to open.
-         */
-        activateGameOverlay (dialog: OverlayDialog): void;
-
-        /**
-         * @en Activate the Steam overlay to a web page.
-         * @zh 打开 Steam 叠加层到指定网页。
-         */
-        activateGameOverlayToWebPage (url: string): void;
-
-        /**
-         * @en Register a callback for when a friend clicks "Join Game" via Rich Presence connect string.
-         * @zh 注册回调，当好友通过 Rich Presence 的 connect 字符串点击"加入游戏"时触发。
-         * @param callback - Receives friendId and the connect string set by the friend's game.
-         * @returns A function to unregister this specific callback.
-         */
-        onGameRichPresenceJoinRequested (callback: (friendId: string, connectString: string) => void): () => void;
+        getRichPresence (userId: string, key: string): Promise<string | null>;
+        /** Optional capability. Resolves when the request is dispatched, not when the page is visible. */
+        openOverlay (dialog: OverlayDialog): Promise<void>;
+        /** Opens an HTTP(S) URL in the platform overlay; same completion boundary as openOverlay. */
+        openWebPage (url: string): Promise<void>;
+        /** Join intent, not a completed connection. Returns an unsubscribe function. */
+        onJoinRequested (callback: (request: JoinRequest) => void): () => void;
     }
 
     // ────────────────────────────────────────────────────
@@ -489,59 +278,22 @@ export declare namespace gs {
      * @zh 提供平台云存储的访问（读、写、删除文件）。
      */
     export class RemoteStorage {
-        /**
-         * @en Write data to a cloud file.
-         * @zh 写入数据到云文件。
-         * @param fileName - The file name.
-         * @param data - The data to write (string).
-         */
-        writeFile (fileName: string, data: string): Promise<void>;
-
-        /**
-         * @en Read a cloud file.
-         * @zh 读取云文件。
-         * @param fileName - The file name.
-         */
-        readFile (fileName: string): Promise<string>;
-
-        /**
-         * @en Delete a cloud file.
-         * @zh 删除云文件。
-         * @param fileName - The file name.
-         */
-        deleteFile (fileName: string): Promise<void>;
-
-        /**
-         * @en Check if a file exists in cloud storage.
-         * @zh 检查云存储中是否存在指定文件。
-         * @param fileName - The file name.
-         */
-        fileExists (fileName: string): boolean;
-
-        /**
-         * @en Get the size of a cloud file in bytes.
-         * @zh 获取云文件大小（字节）。
-         * @param fileName - The file name.
-         */
-        getFileSize (fileName: string): number;
-
-        /**
-         * @en Get the total number of files in cloud storage.
-         * @zh 获取云存储中的文件总数。
-         */
-        getFileCount (): number;
-
-        /**
-         * @en Get the list of all files in cloud storage.
-         * @zh 获取云存储中的所有文件列表。
-         */
-        getFileList (): FileInfo[];
-
-        /**
-         * @en Get cloud storage quota info. Throws if the query fails.
-         * @zh 获取云存储配额信息，查询失败时抛出异常。
-         */
-        getQuota (): QuotaInfo;
+        /** Writes a snapshot of the supplied bytes, including subarray offsets. SDK completion does not guarantee cloud synchronization. */
+        writeFile (name: string, data: Uint8Array): Promise<void>;
+        /** Returns owned bytes. Missing files reject with NotFound; empty files return an empty Uint8Array. */
+        readFile (name: string): Promise<Uint8Array>;
+        /** Writes UTF-8 using the engine TextEncoder. */
+        writeText (name: string, text: string): Promise<void>;
+        /** Reads UTF-8 using the engine TextDecoder; malformed input and BOM handling follow the runtime decoder. */
+        readText (name: string): Promise<string>;
+        /** Deleting an absent file succeeds. A conflicting transfer may reject with Busy. */
+        deleteFile (name: string): Promise<void>;
+        /** Queries metadata; an absent file returns null. Size is in bytes. */
+        getFileInfo (name: string): Promise<FileInfo | null>;
+        /** Queries a snapshot of platform-visible files; an empty store returns []. */
+        listFiles (): Promise<FileInfo[]>;
+        /** Optional quota query in bytes; rejects with NotSupported if unavailable. */
+        getQuota (): Promise<QuotaInfo>;
     }
 
     // ────────────────────────────────────────────────────
@@ -553,48 +305,36 @@ export declare namespace gs {
      * @zh 提供平台统计的访问（设置、获取、存储、重置）。
      */
     export class Stats {
-        /**
-         * @en Set an integer stat value.
-         * @zh 设置整数统计值。
-         * @param name - The stat API name.
-         * @param value - The integer value.
+        /** Current session value; does not guarantee a network refresh.
+         * Read failure rejects GsError, never a fabricated zero. Steam cannot distinguish a
+         * missing stat, wrong type, or unavailable data, and reports PlatformError.
          */
-        setStatInt (name: string, value: number): Promise<void>;
-
-        /**
-         * @en Set a float stat value.
-         * @zh 设置浮点统计值。
-         * @param name - The stat API name.
-         * @param value - The float value.
+        getInt (name: string): Promise<number>;
+        /** Like getInt, for a floating-point stat. */
+        getFloat (name: string): Promise<number>;
+        /** Optional absolute assignment. Resolves when the platform accepts the change;
+         * call flush() at a suitable save point. Success does not imply server persistence.
+         * Integers must be JS-safe integers; Steam further requires signed 32-bit values.
          */
-        setStatFloat (name: string, value: number): Promise<void>;
-
-        /**
-         * @en Get an integer stat value.
-         * @zh 获取整数统计值。
-         * @param name - The stat API name.
+        setInt (name: string, value: number): Promise<void>;
+        /** Optional absolute assignment of a finite number. Steam rounds to float32. */
+        setFloat (name: string, value: number): Promise<void>;
+        /** Optional signed increment, not absolute assignment. Same completion boundary as setInt.
+         * Steam performs local read/add/write without yielding; not atomic across devices.
+         * Out-of-range results reject InvalidArgument before changing the value.
          */
-        getStatInt (name: string): StatIntResult;
-
-        /**
-         * @en Get a float stat value.
-         * @zh 获取浮点统计值。
-         * @param name - The stat API name.
+        incrementInt (name: string, delta: number): Promise<void>;
+        /** Optional finite increment; same semantics as incrementInt with platform float precision. */
+        incrementFloat (name: string, delta: number): Promise<void>;
+        /** Requests submission of accepted changes. Resolves when the platform accepts the
+         * submission request, not on server acknowledgement. Failure does not undo local changes.
+         * Steam submits shared stats and achievement state together.
          */
-        getStatFloat (name: string): StatFloatResult;
-
-        /**
-         * @en Store stats to the platform server.
-         * @zh 将统计数据存储到平台服务器。
+        flush (): Promise<void>;
+        /** Optional reset to platform defaults, preserving achievements unless explicitly requested.
+         * Success means the reset was accepted, not server acknowledgement. Query again afterwards.
          */
-        storeStats (): Promise<void>;
-
-        /**
-         * @en Reset all stats (and optionally achievements).
-         * @zh 重置所有统计数据（可选重置成就）。
-         * @param achievementsToo - Whether to also reset achievements.
-         */
-        resetAllStats (achievementsToo: boolean): boolean;
+        resetAll (options?: ResetStatsOptions): Promise<void>;
     }
 
     // ────────────────────────────────────────────────────
@@ -605,13 +345,12 @@ export declare namespace gs {
      * @en Provides access to platform utility functions.
      * @zh 提供平台工具函数的访问。
      */
+    export enum DiagnosticLevel { Unknown = 0, Info, Warning, Error }
+    export interface DiagnosticMessage { level: DiagnosticLevel; message: string; }
     export class Utils {
-        /**
-         * @en Set a warning message hook to receive platform warnings.
-         * @zh 设置警告消息钩子以接收平台警告。
-         * @param callback - Callback receiving severity and message.
-         * @returns A function to unregister this specific callback.
+        /** Platform diagnostic message; not an operation result. Returns an unsubscribe function.
+         * Availability is indicated by Services.hasModule(ServicesModule.Utils).
          */
-        onWarningMessage (callback: (severity: number, message: string) => void): () => void;
+        onDiagnostic (callback: (message: DiagnosticMessage) => void): () => void;
     }
 }

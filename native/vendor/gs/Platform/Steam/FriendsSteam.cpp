@@ -3,6 +3,7 @@
 
 #include "base/Log.h"
 #include <string>
+#include <limits>
 
 namespace cc::Gs {
 
@@ -16,16 +17,21 @@ static bool parseSteamId(const std::string& str, CSteamID& outId) {
     }
 }
 
-static int toSteamFriendFlags(FriendFlags flags) {
-    if (flags == FriendFlags::All) return k_EFriendFlagAll;
-    int out = k_EFriendFlagNone;
-    if (hasFlag(flags, FriendFlags::Immediate)) out |= k_EFriendFlagImmediate;
-    if (hasFlag(flags, FriendFlags::Blocked)) out |= k_EFriendFlagBlocked;
-    if (hasFlag(flags, FriendFlags::FriendshipRequested)) out |= k_EFriendFlagFriendshipRequested;
-    if (hasFlag(flags, FriendFlags::RequestingFriendship)) out |= k_EFriendFlagRequestingFriendship;
-    if (hasFlag(flags, FriendFlags::ClanMember)) out |= k_EFriendFlagClanMember;
-    if (hasFlag(flags, FriendFlags::OnGameServer)) out |= k_EFriendFlagOnGameServer;
-    return out;
+static PresenceState toPresence(EPersonaState state) {
+    switch (state) {
+    case k_EPersonaStateOffline: return PresenceState::Offline;
+    case k_EPersonaStateOnline:
+    case k_EPersonaStateLookingToTrade:
+    case k_EPersonaStateLookingToPlay: return PresenceState::Online;
+    case k_EPersonaStateAway:
+    case k_EPersonaStateSnooze: return PresenceState::Away;
+    case k_EPersonaStateBusy: return PresenceState::Busy;
+    default: return PresenceState::Unknown;
+    }
+}
+
+static bool validText(const std::string& value) {
+    return !value.empty() && value.find('\0') == std::string::npos;
 }
 
 // Returns nullptr for dialogs Steam has no equivalent for.
@@ -59,39 +65,57 @@ void FriendsSteam::shutdown() {
     _gameRichPresenceJoinDelegate.reset();
 }
 
-std::string FriendsSteam::getPersonaName() {
-    return SteamFriends()->GetPersonaName();
+void FriendsSteam::getLocalUser(OnUserProfile callback) {
+    if (!SteamFriends() || !SteamUser()) {
+        callback.failure({GsErrorCode::NotReady, "Local user is not ready"});
+        return;
+    }
+    const auto id = SteamUser()->GetSteamID();
+    const char* name = SteamFriends()->GetPersonaName();
+    if (!id.IsValid() || !name) {
+        callback.failure({GsErrorCode::PlatformError, "Local user lookup failed"});
+        return;
+    }
+    callback.success({std::to_string(id.ConvertToUint64()), name});
 }
 
-FriendListResult FriendsSteam::getFriends(FriendFlags friendFlags) {
-    const int steamFlags = toSteamFriendFlags(friendFlags);
-    FriendListResult result;
-    int count = SteamFriends()->GetFriendCount(steamFlags);
-    for (int i = 0; i < count; i++) {
-        CSteamID id = SteamFriends()->GetFriendByIndex(i, steamFlags);
-        if (!id.IsValid()) continue;
-
+void FriendsSteam::getFriends(OnFriends callback) {
+    auto* friends = SteamFriends();
+    if (!friends) { callback.failure({GsErrorCode::NotReady, "Friends unavailable"}); return; }
+    const int count = friends->GetFriendCount(k_EFriendFlagImmediate);
+    if (count < 0) { callback.failure({GsErrorCode::NotReady, "Friend list unavailable"}); return; }
+    std::vector<FriendInfo> result;
+    for (int i = 0; i < count; ++i) {
+        const auto id = friends->GetFriendByIndex(i, k_EFriendFlagImmediate);
+        const char* name = friends->GetFriendPersonaName(id);
+        if (!id.IsValid() || !name) {
+            callback.failure({GsErrorCode::PlatformError, "Friend lookup failed"});
+            return;
+        }
         FriendInfo info;
         info.userId = std::to_string(id.ConvertToUint64());
-        info.personaName = SteamFriends()->GetFriendPersonaName(id);
-        const char* nick = SteamFriends()->GetPlayerNickname(id);
-        info.nickname = nick ? nick : "";
-        info.personaState = static_cast<PersonaState>(SteamFriends()->GetFriendPersonaState(id));
-        result.Friends.push_back(std::move(info));
+        info.displayName = name;
+        const char* nick = friends->GetPlayerNickname(id);
+        if (nick && *nick) info.nickname = nick;
+        info.presence = toPresence(friends->GetFriendPersonaState(id));
+        result.push_back(std::move(info));
     }
-    return result;
+    callback.success(std::move(result));
 }
 
 AvatarImage FriendsSteam::fetchAvatar(int handle) {
     AvatarImage img;
-    if (handle <= 0) return img;
+    if (handle <= 0 || !SteamUtils()) return img;
 
     uint32 w = 0, h = 0;
     if (!SteamUtils()->GetImageSize(handle, &w, &h) || w == 0 || h == 0) return img;
 
+    const uint64_t pixels = static_cast<uint64_t>(w) * h;
+    if (pixels > static_cast<uint64_t>(std::numeric_limits<int>::max()) / 4) return img;
+    const uint64_t byteCount = pixels * 4;
     img.width = static_cast<int>(w);
     img.height = static_cast<int>(h);
-    img.data.resize(w * h * 4);
+    img.data.resize(static_cast<size_t>(byteCount));
     if (!SteamUtils()->GetImageRGBA(handle, img.data.data(), static_cast<int>(img.data.size()))) {
         img.data.clear();
         img.width = 0;
@@ -100,10 +124,14 @@ AvatarImage FriendsSteam::fetchAvatar(int handle) {
     return img;
 }
 
-void FriendsSteam::requestAvatar(const AccountId& userId, AvatarSize size, OnAvatarLoaded callback) {
+void FriendsSteam::getAvatar(const AccountId& userId, AvatarSize size, OnAvatarLoaded callback) {
+    if (!SteamFriends() || !SteamUtils()) { callback.failure({GsErrorCode::NotReady, "Avatar service unavailable"}); return; }
+    if (size != AvatarSize::Small && size != AvatarSize::Medium && size != AvatarSize::Large) {
+        callback.failure({GsErrorCode::InvalidArgument, "Invalid avatar size"}); return;
+    }
     CSteamID id;
     if (!parseSteamId(userId, id)) {
-        callback.failure("Invalid userId");
+        callback.failure({GsErrorCode::InvalidArgument, "Invalid userId"});
         return;
     }
 
@@ -116,22 +144,23 @@ void FriendsSteam::requestAvatar(const AccountId& userId, AvatarSize size, OnAva
 
     if (handle > 0) {
         AvatarImage img = fetchAvatar(handle);
-        if (img.data.empty()) callback.failure("Avatar image read failed");
+        if (img.data.empty()) callback.failure({GsErrorCode::PlatformError, "Avatar image read failed"});
         else callback.success(img);
     } else if (size == AvatarSize::Large && handle == -1) {
         // Prevent memory leak: cap the pending queue to avoid infinite accumulation
         // if the Steam network fails to trigger AvatarImageLoaded_t.
         if (_pendingAvatars.size() >= 50) {
-            callback.failure("Avatar request queue full");
+            callback.failure({GsErrorCode::Busy, "Avatar request queue full"});
             return;
         }
         _pendingAvatars.push_back({id, size, std::move(callback), std::chrono::steady_clock::now() + std::chrono::seconds(30)});
     } else {
-        callback.failure("No avatar available");
+        callback.success(std::nullopt);
     }
 }
 
 void FriendsSteam::onAvatarImageLoaded(AvatarImageLoaded_t* pParam) {
+    if (!pParam) return;
     std::vector<PendingAvatar> completed;
     for (auto it = _pendingAvatars.begin(); it != _pendingAvatars.end(); ) {
         if (it->steamId == pParam->m_steamID) {
@@ -144,6 +173,7 @@ void FriendsSteam::onAvatarImageLoaded(AvatarImageLoaded_t* pParam) {
     // User callbacks can enqueue more requests. Never hold a queue iterator
     // while invoking them, and do not consume newly enqueued requests here.
     for (auto& request : completed) {
+        if (!request.callback) continue;
         int handle = 0;
         switch (request.size) {
         case AvatarSize::Small:  handle = SteamFriends()->GetSmallFriendAvatar(request.steamId); break;
@@ -152,10 +182,12 @@ void FriendsSteam::onAvatarImageLoaded(AvatarImageLoaded_t* pParam) {
         }
         if (handle > 0) {
             AvatarImage img = fetchAvatar(handle);
-            if (img.data.empty()) request.callback.failure("Avatar image read failed");
+            if (img.data.empty()) request.callback.failure({GsErrorCode::PlatformError, "Avatar image read failed"});
             else request.callback.success(img);
+        } else if (handle == 0) {
+            request.callback.success(std::nullopt);
         } else {
-            request.callback.failure("Avatar load failed");
+            request.callback.failure({GsErrorCode::PlatformError, "Avatar load failed"});
         }
     }
 }
@@ -168,71 +200,97 @@ void FriendsSteam::expireAvatarRequests(std::chrono::steady_clock::time_point no
             it = _pendingAvatars.erase(it);
         } else ++it;
     }
-    for (auto& callback : expired) callback.failure("Avatar request timed out");
+    for (auto& callback : expired) callback.failure({GsErrorCode::Timeout, "Avatar request timed out"});
 }
 
-FriendsGroupListResult FriendsSteam::getFriendsGroups() {
-    FriendsGroupListResult result;
-    int groupCount = SteamFriends()->GetFriendsGroupCount();
-    for (int i = 0; i < groupCount; i++) {
-        FriendsGroupID_t gid = SteamFriends()->GetFriendsGroupIDByIndex(i);
-        if (gid == k_FriendsGroupID_Invalid) continue;
-
-        FriendsGroupInfo group;
-        group.groupId = gid;
-        const char* name = SteamFriends()->GetFriendsGroupName(gid);
-        group.groupName = name ? name : "";
-
-        int memberCount = SteamFriends()->GetFriendsGroupMembersCount(gid);
-        if (memberCount > 0) {
-            std::vector<CSteamID> memberIds(memberCount);
-            SteamFriends()->GetFriendsGroupMembersList(gid, memberIds.data(), memberCount);
-            for (int m = 0; m < memberCount; m++) {
-                group.members.push_back(std::to_string(memberIds[m].ConvertToUint64()));
-            }
+void FriendsSteam::getGroups(OnFriendGroups callback) {
+    auto* friends = SteamFriends();
+    if (!friends) { callback.failure({GsErrorCode::NotReady, "Friends unavailable"}); return; }
+    std::vector<FriendGroup> result;
+    const int groupCount = friends->GetFriendsGroupCount();
+    if (groupCount < 0) { callback.failure({GsErrorCode::PlatformError, "Group lookup failed"}); return; }
+    for (int i = 0; i < groupCount; ++i) {
+        const auto gid = friends->GetFriendsGroupIDByIndex(i);
+        if (gid == k_FriendsGroupID_Invalid) {
+            callback.failure({GsErrorCode::PlatformError, "Invalid friend group"}); return;
         }
-        result.Groups.push_back(std::move(group));
+        FriendGroup group;
+        group.id = std::to_string(gid);
+        const char* name = friends->GetFriendsGroupName(gid);
+        group.displayName = name ? name : "";
+        const int count = friends->GetFriendsGroupMembersCount(gid);
+        if (count < 0) { callback.failure({GsErrorCode::PlatformError, "Group members unavailable"}); return; }
+        std::vector<CSteamID> members(count);
+        if (count) friends->GetFriendsGroupMembersList(gid, members.data(), count);
+        for (const auto& id : members) {
+            if (!id.IsValid()) { callback.failure({GsErrorCode::PlatformError, "Invalid group member"}); return; }
+            group.memberIds.push_back(std::to_string(id.ConvertToUint64()));
+        }
+        result.push_back(std::move(group));
     }
-    return result;
+    callback.success(std::move(result));
 }
 
-bool FriendsSteam::setRichPresence(const std::string& key, const std::string& value) {
-    return SteamFriends()->SetRichPresence(key.c_str(), value.c_str());
+void FriendsSteam::setRichPresence(const std::string& key, const std::string& value, OnComplete callback) {
+    if (!validText(key) || value.find('\0') != std::string::npos) {
+        callback.failure({GsErrorCode::InvalidArgument, "Invalid presence key or value"}); return;
+    }
+    if (!SteamFriends()) { callback.failure({GsErrorCode::NotReady, "Friends unavailable"}); return; }
+    if (!SteamFriends()->SetRichPresence(key.c_str(), value.c_str())) {
+        callback.failure({GsErrorCode::PlatformError, "Presence update rejected"}); return;
+    }
+    callback.success();
 }
 
-void FriendsSteam::clearRichPresence() {
+void FriendsSteam::clearRichPresence(OnComplete callback) {
+    if (!SteamFriends()) { callback.failure({GsErrorCode::NotReady, "Friends unavailable"}); return; }
     SteamFriends()->ClearRichPresence();
+    callback.success();
 }
 
-std::string FriendsSteam::getFriendRichPresence(const AccountId& userId, const std::string& key) {
+void FriendsSteam::getRichPresence(const AccountId& userId, const std::string& key, OnPresenceValue callback) {
     CSteamID id;
-    if (!parseSteamId(userId, id)) return "";
-    const char* val = SteamFriends()->GetFriendRichPresence(id, key.c_str());
-    return val ? val : "";
+    if (!parseSteamId(userId, id) || !validText(key)) {
+        callback.failure({GsErrorCode::InvalidArgument, "Invalid userId or presence key"}); return;
+    }
+    if (!SteamFriends()) { callback.failure({GsErrorCode::NotReady, "Friends unavailable"}); return; }
+    // Steam exposes the currently cached value; this is not a network refresh.
+    const char* value = SteamFriends()->GetFriendRichPresence(id, key.c_str());
+    if (value && *value) callback.success({std::string(value)});
+    else callback.success({std::nullopt});
 }
 
-void FriendsSteam::activateGameOverlay(OverlayDialog dialog) {
+void FriendsSteam::openOverlay(OverlayDialog dialog, OnComplete callback) {
+    if (!SteamFriends() || !SteamUtils()) { callback.failure({GsErrorCode::NotReady, "Overlay unavailable"}); return; }
     const char* name = toSteamOverlayDialog(dialog);
-    if (!name) {
-        CC_LOG_ERROR("[Friends] activateGameOverlay: dialog %d is not supported on Steam", static_cast<int>(dialog));
-        return;
+    if (!name) { callback.failure({GsErrorCode::InvalidArgument, "Invalid overlay page"}); return; }
+    if (!SteamUtils()->IsOverlayEnabled()) {
+        callback.failure({GsErrorCode::NotReady, "Steam overlay is not enabled"}); return;
     }
     SteamFriends()->ActivateGameOverlay(name);
+    callback.success(); // Request dispatched; no visibility confirmation is available.
 }
 
-void FriendsSteam::activateGameOverlayToWebPage(const std::string& url) {
+void FriendsSteam::openWebPage(const std::string& url, OnComplete callback) {
+    if (!validText(url) || (url.rfind("https://", 0) != 0 && url.rfind("http://", 0) != 0)) {
+        callback.failure({GsErrorCode::InvalidArgument, "Expected an HTTP or HTTPS URL"}); return;
+    }
+    if (!SteamFriends() || !SteamUtils() || !SteamUtils()->IsOverlayEnabled()) {
+        callback.failure({GsErrorCode::NotReady, "Steam overlay is not enabled"}); return;
+    }
     SteamFriends()->ActivateGameOverlayToWebPage(url.c_str());
+    callback.success();
 }
 
-void FriendsSteam::setOnGameRichPresenceJoinRequested(OnGameRichPresenceJoinRequested delegate) {
+void FriendsSteam::setOnJoinRequested(OnJoinRequested delegate) {
     _gameRichPresenceJoinDelegate = std::move(delegate);
 }
 
 void FriendsSteam::onGameRichPresenceJoinRequested(GameRichPresenceJoinRequested_t* pParam) {
-    if (_gameRichPresenceJoinDelegate) {
+    if (pParam && _gameRichPresenceJoinDelegate) {
         std::string friendId = std::to_string(pParam->m_steamIDFriend.ConvertToUint64());
         std::string connectStr = pParam->m_rgchConnect;
-        _gameRichPresenceJoinDelegate.invoke(friendId, connectStr);
+        _gameRichPresenceJoinDelegate.invoke({friendId, connectStr});
     }
 }
 

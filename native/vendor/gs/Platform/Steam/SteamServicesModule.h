@@ -31,10 +31,10 @@ class FriendsSteam;
 
 class SteamPlatform final : public GsPlatform {
 public:
-    bool initialize(GsModules& modules) override;
+    std::optional<GsError> initialize(GsModules& modules) override;
     void pump(float dt) override;
     void shutdown() override;
-    bool restartAppIfNecessary(const AppId& appId) override;
+    void restartAppIfNecessary(const AppId& appId, OnRestartRequired callback) override;
 private:
     bool checkDllAvailable();
     bool _dllChecked = false;

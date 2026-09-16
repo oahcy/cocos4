@@ -23,36 +23,26 @@
 ****************************************************************************/
 
 #pragma once
-
 #include <steam_api.h>
 #include "../../Framework/backends/RemoteStorageBackend.h"
 
 namespace cc::Gs {
-
 class RemoteStorageSteam : public IRemoteStorageBackend {
 public:
-
     void shutdown() override;
-
-    void writeFile(const std::string& fileName, const std::string& data, OnComplete callback) override;
-    void readFile(const std::string& fileName, OnReadFile callback) override;
-    void deleteFile(const std::string& fileName, OnComplete callback) override;
-
-    bool fileExists(const std::string& fileName) override;
-    int32_t getFileSize(const std::string& fileName) override;
-    int32_t getFileCount() override;
-    FileList getFileList() override;
-    QuotaInfo getQuota() override;
-
+    void writeFile(const std::string& name, const FileData& data, OnComplete callback) override;
+    void readFile(const std::string& name, OnReadFile callback) override;
+    void deleteFile(const std::string& name, OnComplete callback) override;
+    void getFileInfo(const std::string& name, OnFileInfo callback) override;
+    void listFiles(OnFileList callback) override;
+    void getQuota(OnQuota callback) override;
 private:
-    void onWriteComplete(RemoteStorageFileWriteAsyncComplete_t* pResult, bool bIOFailure);
-    void onReadComplete(RemoteStorageFileReadAsyncComplete_t* pResult, bool bIOFailure);
-
+    void onWriteComplete(RemoteStorageFileWriteAsyncComplete_t* result, bool ioFailure);
+    void onReadComplete(RemoteStorageFileReadAsyncComplete_t* result, bool ioFailure);
     CCallResult<RemoteStorageSteam, RemoteStorageFileWriteAsyncComplete_t> _writeCallResult;
-    OnComplete _pendingWriteCallback;
-
     CCallResult<RemoteStorageSteam, RemoteStorageFileReadAsyncComplete_t> _readCallResult;
+    OnComplete _pendingWriteCallback;
     OnReadFile _pendingReadCallback;
+    FileData _pendingWriteData;
 };
-
 } // namespace cc::Gs

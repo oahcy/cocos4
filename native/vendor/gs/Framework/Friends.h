@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <optional>
 #include <cstdint>
 #include "commons/GsCallback.h"
 #include "commons/GsTypes.h"
@@ -9,112 +10,75 @@
 #include "base/Ptr.h"
 
 namespace cc::Gs {
-
 class GsSession;
 
-// Values must stay in sync with Steam's EPersonaState: FriendsSteam casts the
-// Steam value straight across.
-enum class PersonaState : uint8_t {
-    Offline = 0,
-    Online,
-    Busy,
-    Away,
-    Snooze,
-    LookingToTrade,
-    LookingToPlay,
-    Invisible
-};
-
-enum class AvatarSize : uint8_t {
-    Small = 0,
-    Medium,
-    Large
-};
-
-// Bit flags for getFriends(). Each platform maps these onto its own constants.
-enum class FriendFlags : uint32_t {
-    None = 0,
-    Immediate = 1U << 0,            // confirmed friends
-    Blocked = 1U << 1,
-    FriendshipRequested = 1U << 2,  // incoming request
-    RequestingFriendship = 1U << 3, // outgoing request
-    ClanMember = 1U << 4,
-    OnGameServer = 1U << 5,
-    All = 0xFFFFFFFFU
-};
-
-inline FriendFlags operator|(FriendFlags a, FriendFlags b) {
-    return static_cast<FriendFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
-}
-
-inline bool hasFlag(FriendFlags value, FriendFlags flag) {
-    return (static_cast<uint32_t>(value) & static_cast<uint32_t>(flag)) != 0;
-}
-
-// Platform overlay pages. Not every platform supports every page; unsupported
-// values are rejected by the implementation.
+// Platform values are explicitly mapped by each backend.
+enum class PresenceState : uint8_t { Unknown = 0, Offline, Online, Away, Busy };
+enum class AvatarSize : uint8_t { Small = 0, Medium, Large };
 enum class OverlayDialog : uint8_t {
-    Friends = 0,
-    Community,
-    Players,
-    Settings,
-    OfficialGameGroup,
-    Stats,
-    Achievements
+    Friends = 0, Community, Players, Settings, OfficialGameGroup, Stats, Achievements
 };
 
+struct UserProfile {
+    AccountId userId;
+    std::string displayName;
+};
 struct FriendInfo {
     AccountId userId;
-    std::string personaName;
-    std::string nickname;
-    PersonaState personaState = PersonaState::Offline;
+    std::string displayName;
+    std::optional<std::string> nickname;
+    PresenceState presence = PresenceState::Unknown;
 };
-
-struct FriendListResult {
-    std::vector<FriendInfo> Friends;
-};
-
 struct AvatarImage {
     int width = 0;
     int height = 0;
-    std::vector<uint8_t> data;
+    std::vector<uint8_t> data; // RGBA8, tightly packed rows.
 };
-
-struct FriendsGroupInfo {
-    int16_t groupId = -1;
-    std::string groupName;
-    std::vector<AccountId> members;
+struct FriendGroup {
+    std::string id;
+    std::string displayName;
+    std::vector<AccountId> memberIds;
 };
-
-struct FriendsGroupListResult {
-    std::vector<FriendsGroupInfo> Groups;
+struct PresenceValue { std::optional<std::string> value; };
+struct JoinRequest {
+    AccountId userId;
+    std::string connectionString; // Opaque game-defined connection data.
 };
 
 #ifdef SWIG
+using OnUserProfile = AsyncCallbackBase;
+using OnFriends = AsyncCallbackBase;
 using OnAvatarLoaded = AsyncCallbackBase;
+using OnFriendGroups = AsyncCallbackBase;
+using OnPresenceValue = AsyncCallbackBase;
+using OnJoinRequested = EventDelegateBase;
 #else
-using OnAvatarLoaded = AsyncCallback<AvatarImage>;
+using OnUserProfile = AsyncCallback<UserProfile>;
+using OnFriends = AsyncCallback<std::vector<FriendInfo>>;
+using OnAvatarLoaded = AsyncCallback<std::optional<AvatarImage>>;
+using OnFriendGroups = AsyncCallback<std::vector<FriendGroup>>;
+using OnPresenceValue = AsyncCallback<PresenceValue>;
+using OnJoinRequested = EventDelegate<JoinRequest>;
 #endif
 
-// JSB facade: retains its original session, never the platform implementation.
+// JSB facade retains its original session, never the backend.
 class IFriends final : public cc::RefCounted {
 public:
     ~IFriends() override;
-    std::string getPersonaName();
-    FriendListResult getFriends(FriendFlags friendFlags);
-    void requestAvatar(const AccountId& userId, AvatarSize size, OnAvatarLoaded callback);
-    FriendsGroupListResult getFriendsGroups();
-    bool setRichPresence(const std::string& key, const std::string& value);
-    void clearRichPresence();
-    std::string getFriendRichPresence(const AccountId& userId, const std::string& key);
-    void activateGameOverlay(OverlayDialog dialog);
-    void activateGameOverlayToWebPage(const std::string& url);
-    void setOnGameRichPresenceJoinRequested(OnGameRichPresenceJoinRequested delegate);
+    void getLocalUser(OnUserProfile callback);
+    void getFriends(OnFriends callback);
+    void getAvatar(const AccountId& userId, AvatarSize size, OnAvatarLoaded callback);
+    void getGroups(OnFriendGroups callback);
+    void setRichPresence(const std::string& key, const std::string& value, OnComplete callback);
+    void clearRichPresence(OnComplete callback);
+    void getRichPresence(const AccountId& userId, const std::string& key, OnPresenceValue callback);
+    void openOverlay(OverlayDialog dialog, OnComplete callback);
+    void openWebPage(const std::string& url, OnComplete callback);
+    void setOnJoinRequested(OnJoinRequested delegate);
 #ifndef SWIG
     explicit IFriends(cc::IntrusivePtr<GsSession> session);
 private:
     cc::IntrusivePtr<GsSession> _session;
 #endif
 };
-
 } // namespace cc::Gs

@@ -1,24 +1,17 @@
 #pragma once
-
 #include <steam_api.h>
-#include <functional>
 #include "../../Framework/backends/StatsBackend.h"
 
 namespace cc::Gs {
-
 class StatsSteam : public IStatsBackend {
 public:
-    explicit StatsSteam(std::function<void()> invalidateAchievements = {})
-        : _invalidateAchievements(std::move(invalidateAchievements)) {}
-
-    void setStatInt(const std::string& name, int32_t value, OnComplete callback) override;
-    void setStatFloat(const std::string& name, float value, OnComplete callback) override;
-    StatIntResult getStatInt(const std::string& name) override;
-    StatFloatResult getStatFloat(const std::string& name) override;
-    void storeStats(OnComplete callback) override;
-    bool resetAllStats(bool achievementsToo) override;
-private:
-    std::function<void()> _invalidateAchievements;
+    void getInt(const std::string& name, OnStatInt callback) override;
+    void getFloat(const std::string& name, OnStatFloat callback) override;
+    void setInt(const std::string& name, int64_t value, OnComplete callback) override;
+    void setFloat(const std::string& name, double value, OnComplete callback) override;
+    void incrementInt(const std::string& name, int64_t delta, OnComplete callback) override;
+    void incrementFloat(const std::string& name, double delta, OnComplete callback) override;
+    void flush(OnComplete callback) override;
+    void resetAll(bool includeAchievements, OnComplete callback) override;
 };
-
 } // namespace cc::Gs

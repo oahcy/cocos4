@@ -1,59 +1,47 @@
 #pragma once
-
 #include <string>
 #include <vector>
+#include <optional>
 #include <cstdint>
 #include "commons/GsCallback.h"
 #include "base/RefCounted.h"
 #include "base/Ptr.h"
 
 namespace cc::Gs {
-
 class GsSession;
-
 struct AchievementDefinition {
-    std::string AchievementId;
-    std::string DisplayName;
-    std::string Description;
+    std::string id;
+    std::string displayName;
+    std::string description;
 };
-
 struct AchievementState {
-    std::string AchievementId;
-    float Progress = 0.0f;
-    uint32_t UnlockTimeSec = 0;
+    std::string id;
+    bool unlocked = false;
+    std::optional<float> progress; // Percent [0, 100], absent if unknown.
+    std::optional<int64_t> unlockedAt; // Unix seconds; absent if unknown/locked.
 };
-
-struct AchievementIdsResult {
-    std::vector<std::string> AchievementIds;
-};
-
-struct AchievementDefinitionResult {
-    bool Found = false;
-    AchievementDefinition Definition;
-};
-
-struct AchievementStateResult {
-    bool Found = false;
-    AchievementState State;
-};
-
-// JSB facade: retains its original session, never the platform implementation.
+#ifdef SWIG
+using OnAchievementDefinitions = AsyncCallbackBase;
+using OnAchievementStates = AsyncCallbackBase;
+using OnAchievementUpdated = EventDelegateBase;
+#else
+using OnAchievementDefinitions = AsyncCallback<std::vector<AchievementDefinition>>;
+using OnAchievementStates = AsyncCallback<std::vector<AchievementState>>;
+using OnAchievementUpdated = EventDelegate<AchievementState>;
+#endif
+// Each facade is permanently bound to its original session.
 class IAchievements final : public cc::RefCounted {
 public:
     ~IAchievements() override;
-    void queryAchievementDefinitions(OnComplete callback);
-    void queryAchievementStates(OnComplete callback);
-    void unlockAchievements(const std::string& achievementId, OnComplete callback);
-    void clearAchievement(const std::string& achievementId, OnComplete callback);
-    AchievementIdsResult getAchievementIds();
-    AchievementDefinitionResult getAchievementDefinition(const std::string& achievementId);
-    AchievementStateResult getAchievementState(const std::string& achievementId);
-    void setOnAchievementStateUpdated(OnAchievementStateUpdated callback);
+    void queryDefinitions(OnAchievementDefinitions callback);
+    void queryStates(OnAchievementStates callback);
+    void unlock(const std::string& id, OnComplete callback);
+    void clearAchievement(const std::string& id, OnComplete callback);
+    void setOnUpdated(OnAchievementUpdated callback);
 #ifndef SWIG
     explicit IAchievements(cc::IntrusivePtr<GsSession> session);
 private:
     cc::IntrusivePtr<GsSession> _session;
 #endif
 };
-
 } // namespace cc::Gs

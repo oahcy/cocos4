@@ -2,101 +2,131 @@
 #include "commons/GsSession.h"
 
 namespace cc::Gs {
-
 IFriends::IFriends(IntrusivePtr<GsSession> session) : _session(std::move(session)) {}
 IFriends::~IFriends() = default;
 
-std::string IFriends::getPersonaName() {
+void IFriends::getLocalUser(OnUserProfile callback) {
     GsSession::Dispatch dispatch(*_session);
     auto* backend = _session->friends();
     if (!backend) {
-        return {};
-    }
-    return backend->getPersonaName();
-}
-
-FriendListResult IFriends::getFriends(FriendFlags friendFlags) {
-    GsSession::Dispatch dispatch(*_session);
-    auto* backend = _session->friends();
-    if (!backend) {
-        return {};
-    }
-    return backend->getFriends(friendFlags);
-}
-
-void IFriends::requestAvatar(const AccountId& userId, AvatarSize size, OnAvatarLoaded callback) {
-    GsSession::Dispatch dispatch(*_session);
-    auto* backend = _session->friends();
-    if (!backend) {
-        callback.failure("Friends unavailable or services closed");
+        const auto code = _session->isClosed() || _session->isClosing() ? GsErrorCode::Cancelled
+            : (_session->isActive() ? GsErrorCode::NotSupported : GsErrorCode::NotReady);
+        callback.failure({code, "Friends unavailable in this session"});
         return;
     }
     _session->track(callback.pending());
-    backend->requestAvatar(userId, size, std::move(callback));
+    backend->getLocalUser(std::move(callback));
 }
 
-FriendsGroupListResult IFriends::getFriendsGroups() {
+void IFriends::getFriends(OnFriends callback) {
     GsSession::Dispatch dispatch(*_session);
     auto* backend = _session->friends();
     if (!backend) {
-        return {};
-    }
-    return backend->getFriendsGroups();
-}
-
-bool IFriends::setRichPresence(const std::string& key, const std::string& value) {
-    GsSession::Dispatch dispatch(*_session);
-    auto* backend = _session->friends();
-    if (!backend) {
-        return {};
-    }
-    return backend->setRichPresence(key, value);
-}
-
-void IFriends::clearRichPresence() {
-    GsSession::Dispatch dispatch(*_session);
-    auto* backend = _session->friends();
-    if (!backend) {
+        const auto code = _session->isClosed() || _session->isClosing() ? GsErrorCode::Cancelled
+            : (_session->isActive() ? GsErrorCode::NotSupported : GsErrorCode::NotReady);
+        callback.failure({code, "Friends unavailable in this session"});
         return;
     }
-    backend->clearRichPresence();
+    _session->track(callback.pending());
+    backend->getFriends(std::move(callback));
 }
 
-std::string IFriends::getFriendRichPresence(const AccountId& userId, const std::string& key) {
+void IFriends::getAvatar(const AccountId& userId, AvatarSize size, OnAvatarLoaded callback) {
     GsSession::Dispatch dispatch(*_session);
     auto* backend = _session->friends();
     if (!backend) {
-        return {};
-    }
-    return backend->getFriendRichPresence(userId, key);
-}
-
-void IFriends::activateGameOverlay(OverlayDialog dialog) {
-    GsSession::Dispatch dispatch(*_session);
-    auto* backend = _session->friends();
-    if (!backend) {
+        const auto code = _session->isClosed() || _session->isClosing() ? GsErrorCode::Cancelled
+            : (_session->isActive() ? GsErrorCode::NotSupported : GsErrorCode::NotReady);
+        callback.failure({code, "Friends unavailable in this session"});
         return;
     }
-    backend->activateGameOverlay(dialog);
+    _session->track(callback.pending());
+    backend->getAvatar(userId, size, std::move(callback));
 }
 
-void IFriends::activateGameOverlayToWebPage(const std::string& url) {
+void IFriends::getGroups(OnFriendGroups callback) {
     GsSession::Dispatch dispatch(*_session);
     auto* backend = _session->friends();
     if (!backend) {
+        const auto code = _session->isClosed() || _session->isClosing() ? GsErrorCode::Cancelled
+            : (_session->isActive() ? GsErrorCode::NotSupported : GsErrorCode::NotReady);
+        callback.failure({code, "Friends unavailable in this session"});
         return;
     }
-    backend->activateGameOverlayToWebPage(url);
+    _session->track(callback.pending());
+    backend->getGroups(std::move(callback));
 }
 
-void IFriends::setOnGameRichPresenceJoinRequested(OnGameRichPresenceJoinRequested delegate) {
+void IFriends::setRichPresence(const std::string& key, const std::string& value, OnComplete callback) {
     GsSession::Dispatch dispatch(*_session);
     auto* backend = _session->friends();
     if (!backend) {
+        const auto code = _session->isClosed() || _session->isClosing() ? GsErrorCode::Cancelled
+            : (_session->isActive() ? GsErrorCode::NotSupported : GsErrorCode::NotReady);
+        callback.failure({code, "Friends unavailable in this session"});
         return;
     }
+    _session->track(callback.pending());
+    backend->setRichPresence(key, value, std::move(callback));
+}
+
+void IFriends::clearRichPresence(OnComplete callback) {
+    GsSession::Dispatch dispatch(*_session);
+    auto* backend = _session->friends();
+    if (!backend) {
+        const auto code = _session->isClosed() || _session->isClosing() ? GsErrorCode::Cancelled
+            : (_session->isActive() ? GsErrorCode::NotSupported : GsErrorCode::NotReady);
+        callback.failure({code, "Friends unavailable in this session"});
+        return;
+    }
+    _session->track(callback.pending());
+    backend->clearRichPresence(std::move(callback));
+}
+
+void IFriends::getRichPresence(const AccountId& userId, const std::string& key, OnPresenceValue callback) {
+    GsSession::Dispatch dispatch(*_session);
+    auto* backend = _session->friends();
+    if (!backend) {
+        const auto code = _session->isClosed() || _session->isClosing() ? GsErrorCode::Cancelled
+            : (_session->isActive() ? GsErrorCode::NotSupported : GsErrorCode::NotReady);
+        callback.failure({code, "Friends unavailable in this session"});
+        return;
+    }
+    _session->track(callback.pending());
+    backend->getRichPresence(userId, key, std::move(callback));
+}
+
+void IFriends::openOverlay(OverlayDialog dialog, OnComplete callback) {
+    GsSession::Dispatch dispatch(*_session);
+    auto* backend = _session->friends();
+    if (!backend) {
+        const auto code = _session->isClosed() || _session->isClosing() ? GsErrorCode::Cancelled
+            : (_session->isActive() ? GsErrorCode::NotSupported : GsErrorCode::NotReady);
+        callback.failure({code, "Friends unavailable in this session"});
+        return;
+    }
+    _session->track(callback.pending());
+    backend->openOverlay(dialog, std::move(callback));
+}
+
+void IFriends::openWebPage(const std::string& url, OnComplete callback) {
+    GsSession::Dispatch dispatch(*_session);
+    auto* backend = _session->friends();
+    if (!backend) {
+        const auto code = _session->isClosed() || _session->isClosing() ? GsErrorCode::Cancelled
+            : (_session->isActive() ? GsErrorCode::NotSupported : GsErrorCode::NotReady);
+        callback.failure({code, "Friends unavailable in this session"});
+        return;
+    }
+    _session->track(callback.pending());
+    backend->openWebPage(url, std::move(callback));
+}
+
+void IFriends::setOnJoinRequested(OnJoinRequested delegate) {
+    GsSession::Dispatch dispatch(*_session);
+    auto* backend = _session->friends();
+    if (!backend) return;
     delegate.setGate(_session->gate());
-    backend->setOnGameRichPresenceJoinRequested(std::move(delegate));
+    backend->setOnJoinRequested(std::move(delegate));
 }
-
 } // namespace cc::Gs

@@ -23,8 +23,8 @@
 ****************************************************************************/
 
 #pragma once
-
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 #include "commons/GsCallback.h"
@@ -32,41 +32,41 @@
 #include "base/Ptr.h"
 
 namespace cc::Gs {
-
 class GsSession;
-
 struct FileInfo {
-    std::string FileName;
-    int32_t FileSize = 0;
+    std::string name;
+    uint64_t size = 0; // Bytes.
 };
-
 struct QuotaInfo {
-    bool Success = false;
-    uint64_t TotalBytes = 0;
-    uint64_t AvailableBytes = 0;
+    uint64_t totalBytes = 0;
+    uint64_t availableBytes = 0;
 };
-
-struct FileList {
-    std::vector<FileInfo> Files;
-};
-
-// JSB facade: retains its original session, never the platform implementation.
+// JSB maps this owned byte buffer to/from Uint8Array, including subarray offsets.
+struct FileData { std::vector<uint8_t> bytes; };
+#ifdef SWIG
+using OnReadFile = AsyncCallbackBase;
+using OnFileInfo = AsyncCallbackBase;
+using OnFileList = AsyncCallbackBase;
+using OnQuota = AsyncCallbackBase;
+#else
+using OnReadFile = AsyncCallback<FileData>;
+using OnFileInfo = AsyncCallback<std::optional<FileInfo>>;
+using OnFileList = AsyncCallback<std::vector<FileInfo>>;
+using OnQuota = AsyncCallback<QuotaInfo>;
+#endif
 class IRemoteStorage final : public cc::RefCounted {
 public:
     ~IRemoteStorage() override;
-    void writeFile(const std::string& fileName, const std::string& data, OnComplete callback);
-    void readFile(const std::string& fileName, OnReadFile callback);
-    void deleteFile(const std::string& fileName, OnComplete callback);
-    bool fileExists(const std::string& fileName);
-    int32_t getFileSize(const std::string& fileName);
-    int32_t getFileCount();
-    FileList getFileList();
-    QuotaInfo getQuota();
+    void writeFile(const std::string& name, const FileData& data, OnComplete callback);
+    void readFile(const std::string& name, OnReadFile callback);
+    void deleteFile(const std::string& name, OnComplete callback);
+    void getFileInfo(const std::string& name, OnFileInfo callback);
+    void listFiles(OnFileList callback);
+    void getQuota(OnQuota callback);
 #ifndef SWIG
     explicit IRemoteStorage(cc::IntrusivePtr<GsSession> session);
 private:
     cc::IntrusivePtr<GsSession> _session;
 #endif
 };
-
 } // namespace cc::Gs

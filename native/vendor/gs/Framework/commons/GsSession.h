@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <vector>
 #include "GsServices.h"
 #include "../backends/AchievementsBackend.h"
@@ -21,30 +22,34 @@ struct GsModules {
 };
 
 // SDK-specific preparation and teardown stay outside the generic session.
-// initialize() returning false must undo any SDK resources it acquired.
+// On initialization failure the platform must undo any SDK resources it acquired.
 class GsPlatform {
 public:
     virtual ~GsPlatform() = default;
-    virtual bool initialize(GsModules& modules) = 0;
+    virtual std::optional<GsError> initialize(GsModules& modules) = 0;
     virtual void pump(float dt) = 0;
     virtual void shutdown() = 0;
-    virtual bool restartAppIfNecessary(const AppId&) { return false; }
+    // Like initialize(), launcher preparation completes within this call.
+    virtual void restartAppIfNecessary(const AppId&, OnRestartRequired callback) {
+        callback.failure({GsErrorCode::NotSupported, "Launcher restart is not supported"});
+    }
 };
 
 // All operations run on the engine thread. Module facades retain this object,
 // but it never owns facades, so closing releases the backends without a cycle.
 class GsSession final : public RefCounted {
 public:
-    enum class State { Created, Active, Closing, Closed };
+    using State = ServicesState;
     explicit GsSession(std::unique_ptr<GsPlatform> platform);
     ~GsSession() override;
-    bool init();
+    void init(OnComplete callback);
+    ServicesState getState() const { return _state; }
     void close();
     void tick(float dt);
-    bool restartAppIfNecessary(const AppId& appId);
+    void restartAppIfNecessary(const AppId& appId, OnRestartRequired callback);
     bool isClosed() const { return _state == State::Closed; }
     bool isClosing() const { return _state == State::Closing; }
-    bool isActive() const { return _state == State::Active; }
+    bool isActive() const { return _state == State::Ready; }
 
     class Dispatch {
     public:

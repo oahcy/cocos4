@@ -9,10 +9,10 @@
 | 能力 | 说明 | 状态 |
 |------|------|------|
 | **Achievements（成就）** | 查询成就定义/状态、解锁、清除 | ✅ 已完成 -- `IAchievements`（`Framework/Achievements.h`）+ `AchievementsSteam` + TS `AchievementsHelper` |
-| **Stats（统计）** | 读写整数/浮点统计值、存储、重置 | ✅ 已完成 -- `IStats`（`Framework/Stats.h`）+ `StatsSteam` + TS `StatsHelper` |
+| **Stats（统计）** | 读写整数/浮点统计值、增量、提交、重置 | ✅ 已完成 -- `IStats`（`Framework/Stats.h`）+ `StatsSteam` + TS `StatsHelper` |
 | **Friends（好友）** | 好友列表、头像、Rich Presence、分组、Overlay 唤起、Rich Presence 加入事件 | ✅ 已完成 -- `IFriends`（`Framework/Friends.h`）+ `FriendsSteam` + TS `FriendsHelper` |
 | **RemoteStorage（云存档）** | 云存档读/写/删除 + 文件/配额查询 | ✅ 已完成 -- `IRemoteStorage`（`Framework/RemoteStorage.h`）+ `RemoteStorageSteam` + TS `RemoteStorageHelper` |
-| **Utils（工具）** | 仅警告消息钩子 | ✅ 已完成 -- `IUtils`（`Framework/Utils.h`）+ `UtilsSteam` + TS `UtilsHelper` |
+| **Utils（工具）** | 统一诊断消息订阅 | ✅ 已完成 -- `IUtils`（`Framework/Utils.h`）+ `UtilsSteam` + TS `UtilsHelper` |
 | **User（用户）** | 身份与认证（SteamID、登录状态、Auth Ticket） | ⬜ 待实现（High Priority）-- 所有游戏都需要 |
 | **Apps（应用）** | 应用/DLC 所有权、语言、构建信息 | ⬜ 待实现（High Priority）-- 以同步调用为主，实现成本低 |
 | **Leaderboards（排行榜）** | 查找/创建排行榜、上传/下载分数 | ⬜ 待实现（High Priority）-- 复用已封装的 `ISteamUserStats`，无新增 SDK 依赖 |
@@ -23,7 +23,7 @@
 - **DLL 延迟加载** -- `SteamPlatform::checkDllAvailable()` 中的 `LoadLibraryA` 探测（`Platform/Steam/SteamServicesModule.cpp`）
 - **Tick** -- `jsb_module_register.cpp` 中每个脚本上下文创建的 `cc::events::Tick` 监听器，每帧驱动 `SteamAPI_RunCallbacks()`
 
-目前没有配套的示例项目 -- `STEAM_INTEGRATION.md` 里的用法示例是目前最接近的东西。
+当前公共 API 和生命周期约定见 `STEAM_INTEGRATION.md`。
 
 实现新能力时遵循模块 Facade + Backend 模式（Framework/Achievements.h/.cpp、
 Framework/backends/AchievementsBackend.h、Platform/Steam/AchievementsSteam.h/.cpp、
@@ -33,7 +33,7 @@ TS AchievementsHelper）。由 Session 独占 Backend，对 JS 只暴露模块�
 
 ## 接口细节
 
-以下是尚未实现的四个能力（User / Apps / Leaderboards / Matchmaking）的具体接口/回调清单。
+以下是尚未实现能力的 Steam Backend 参考清单，不是已确定的 GS 公共接口。新增 API 应按平台无关、异步查询及结构化错误约定设计，再由 Backend 适配。当前 Friends.getLocalUser 已提供本地用户 ID 和显示名；完整认证仍未实现。
 
 ### User（用户）
 
@@ -88,8 +88,7 @@ TS AchievementsHelper）。由 Session 独占 Backend，对 JS 只暴露模块�
 ### Leaderboards（排行榜）
 
 与 Achievements/Stats 共用同一个 native 接口（`ISteamUserStats`），因此无需引入新的 SDK 依赖 --
-绝大多数按分数/时间排名的游戏都会用到。建议与 `StatsSteam`（`Platform/Steam/StatsSteam.h`）放在一起实现，
-而不是单独建一个平台文件，因为底层是同一个 `ISteamUserStats` 指针。
+绝大多数按分数/时间排名的游戏都会用到。排行榜应作为独立模块实现，保持业务边界；Backend 可以使用同一个 `ISteamUserStats` SDK 接口。
 
 | 接口 | 说明 |
 |------|------|

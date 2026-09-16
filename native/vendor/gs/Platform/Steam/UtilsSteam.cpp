@@ -4,12 +4,14 @@
 
 namespace cc::Gs {
 
-OnWarningMessage UtilsSteam::s_callback;
+OnDiagnostic UtilsSteam::s_callback;
 
 void UtilsSteam::steamWarningHook(int severity, const char* msg) {
-    CC_LOG_INFO("[Steam Warning] severity=%d: %s", severity, msg);
+    CC_LOG_INFO("[Steam Warning] severity=%d: %s", severity, msg ? msg : "");
     if (s_callback) {
-        s_callback.invoke(severity, std::string(msg));
+        const auto level = severity == 0 ? DiagnosticLevel::Info
+            : (severity == 1 ? DiagnosticLevel::Warning : DiagnosticLevel::Unknown);
+        s_callback.invoke({level, msg ? msg : ""});
     }
 }
 
@@ -23,7 +25,7 @@ void UtilsSteam::shutdown() {
     }
 }
 
-void UtilsSteam::setWarningMessageHook(OnWarningMessage callback) {
+void UtilsSteam::setOnDiagnostic(OnDiagnostic callback) {
     s_callback = std::move(callback);
     auto* utils = SteamUtils();
     if (utils) {

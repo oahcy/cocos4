@@ -28,26 +28,20 @@ using namespace cc::Gs;
 %ignore cc::Gs::EventDelegateBase;
 %ignore cc::RefCounted;
 
-// Native-side helper for combining FriendFlags; JS passes a plain bitmask number.
-%ignore cc::Gs::hasFlag;
-
 // Result structs are converted to plain JS objects by JsbConversions.h, so the
 // SWIG-wrapped classes (and their member setters) are never used from JS.
+%ignore cc::Gs::DiagnosticMessage;
 %ignore cc::Gs::AchievementDefinition;
 %ignore cc::Gs::AchievementState;
-%ignore cc::Gs::AchievementIdsResult;
-%ignore cc::Gs::AchievementDefinitionResult;
-%ignore cc::Gs::AchievementStateResult;
 %ignore cc::Gs::FriendInfo;
-%ignore cc::Gs::FriendListResult;
+%ignore cc::Gs::UserProfile;
+%ignore cc::Gs::PresenceValue;
+%ignore cc::Gs::JoinRequest;
 %ignore cc::Gs::AvatarImage;
-%ignore cc::Gs::FriendsGroupInfo;
-%ignore cc::Gs::FriendsGroupListResult;
+%ignore cc::Gs::FriendGroup;
 %ignore cc::Gs::FileInfo;
 %ignore cc::Gs::QuotaInfo;
-%ignore cc::Gs::FileList;
-%ignore cc::Gs::StatIntResult;
-%ignore cc::Gs::StatFloatResult;
+%ignore cc::Gs::FileData;
 
 // Tick is driven by the script-context listener registered in jsb_module_register.cpp.
 %ignore cc::Gs::IGsServices::tick;

@@ -22,7 +22,7 @@
  THE SOFTWARE.
 ****************************************************************************/
 
-import type { OnSuccessListener, OnReadFileListener } from './callback';
+import { GsError, GsErrorCode, toGsError } from './errors';
 
 declare const jsb: any;
 
@@ -31,15 +31,16 @@ declare const jsb: any;
 // ────────────────────────────────────────────────────
 
 export interface AchievementDefinition {
-    AchievementId: string;
-    DisplayName: string;
-    Description: string;
+    id: string;
+    displayName: string;
+    description: string;
 }
 
 export interface AchievementState {
-    AchievementId: string;
-    Progress: number;
-    UnlockTimeSec: number;
+    id: string;
+    unlocked: boolean;
+    progress: number | null;
+    unlockedAt: number | null;
 }
 
 // ────────────────────────────────────────────────────
@@ -47,15 +48,22 @@ export interface AchievementState {
 // ────────────────────────────────────────────────────
 
 class ServicesLifecycle {
-    constructor (private readonly native: { isClosed(): boolean; isClosing(): boolean }) {}
+    constructor (private readonly native: { isClosed(): boolean; isClosing(): boolean; getState(): number }, readonly provider: number) {}
 
     isClosed (): boolean {
         return this.native.isClosed() || this.native.isClosing();
     }
 
+    assertReady (who: string): void {
+        this.assertAlive(who);
+        if (this.native.getState() !== jsb.ServicesState.Ready) {
+            throw new GsError(GsErrorCode.NotReady, '[gs] Await init() before using ' + who, this.provider);
+        }
+    }
+
     assertAlive (who: string): void {
         if (this.isClosed()) {
-            throw new Error(`[gs] ${who} has been destroyed. Fetch a fresh services instance via getServices().`);
+            throw new GsError(GsErrorCode.Cancelled, `[gs] ${who} has been destroyed. Fetch a fresh services instance via getServices().`, this.provider);
         }
     }
 }
@@ -73,6 +81,10 @@ class GsHelperBase {
         this._name = name;
     }
 
+    protected toError (error: unknown): GsError {
+        return toGsError(error, this._lifecycle.provider);
+    }
+
     protected assertAlive (): void {
         this._lifecycle.assertAlive(this._name);
     }
@@ -83,100 +95,90 @@ class GsHelperBase {
 // ────────────────────────────────────────────────────
 
 export class AchievementsHelper extends GsHelperBase {
-    private _achievementListeners = new Set<(achievementId: string, progress: number, unlockTimeSec: number) => void>();
+    private _achievementListeners = new Set<(state: AchievementState) => void>();
     private _nativeListenerBound = false;
 
     constructor (native: any, lifecycle: ServicesLifecycle) {
         super(native, lifecycle, 'AchievementsHelper');
     }
 
-    queryAchievementDefinitions (): Promise<void> {
+    private validateId (id: string): void {
+        if (typeof id !== 'string' || !id.length || id.includes('\0')) {
+            throw this.toError({ code: GsErrorCode.InvalidArgument, message: 'Invalid achievement ID' });
+        }
+    }
+
+    async queryDefinitions (): Promise<AchievementDefinition[]> {
         this.assertAlive();
         return new Promise((resolve, reject) => {
-            this._native.queryAchievementDefinitions({
-                onSuccess: () => resolve(),
-                onFailure: (err: string) => reject(new Error(err)),
+            this._native.queryDefinitions({
+                onSuccess: (definitions: AchievementDefinition[]) => resolve(definitions),
+                onFailure: (error: unknown) => reject(this.toError(error)),
             });
         });
     }
 
-    queryAchievementStates (): Promise<void> {
+    async queryStates (): Promise<AchievementState[]> {
         this.assertAlive();
         return new Promise((resolve, reject) => {
-            this._native.queryAchievementStates({
-                onSuccess: () => resolve(),
-                onFailure: (err: string) => reject(new Error(err)),
+            this._native.queryStates({
+                onSuccess: (states: AchievementState[]) => resolve(states),
+                onFailure: (error: unknown) => reject(this.toError(error)),
             });
         });
     }
 
-    unlockAchievements (achievementId: string): Promise<void> {
+    async unlock (id: string): Promise<void> {
         this.assertAlive();
+        this.validateId(id);
         return new Promise((resolve, reject) => {
-            this._native.unlockAchievements(achievementId, {
+            this._native.unlock(id, {
                 onSuccess: () => resolve(),
-                onFailure: (err: string) => reject(new Error(err)),
+                onFailure: (error: unknown) => reject(this.toError(error)),
             });
         });
     }
 
-    clearAchievement (achievementId: string): Promise<void> {
+    async clearAchievement (id: string): Promise<void> {
         this.assertAlive();
+        this.validateId(id);
         return new Promise((resolve, reject) => {
-            this._native.clearAchievement(achievementId, {
+            this._native.clearAchievement(id, {
                 onSuccess: () => resolve(),
-                onFailure: (err: string) => reject(new Error(err)),
+                onFailure: (error: unknown) => reject(this.toError(error)),
             });
         });
     }
 
-    getAchievementIds (): string[] {
+    onUpdated (callback: (state: AchievementState) => void): () => void {
         this.assertAlive();
-        const result = this._native.getAchievementIds();
-        return result ? result.AchievementIds : [];
-    }
-
-    getAchievementDefinition (achievementId: string): AchievementDefinition | null {
-        this.assertAlive();
-        const result = this._native.getAchievementDefinition(achievementId);
-        return result ? result.Definition : null;
-    }
-
-    getAchievementState (achievementId: string): AchievementState | null {
-        this.assertAlive();
-        const result = this._native.getAchievementState(achievementId);
-        return result ? result.State : null;
-    }
-
-    onAchievementStateUpdated (callback: (achievementId: string, progress: number, unlockTimeSec: number) => void): () => void {
-        this.assertAlive();
-        this._achievementListeners.add(callback);
-
+        if (typeof callback !== 'function') throw this.toError({ code: GsErrorCode.InvalidArgument, message: 'Expected an event listener' });
+        // Each registration owns its unsubscribe token, even for the same callback.
+        const subscription = (state: AchievementState): void => callback(state);
+        this._achievementListeners.add(subscription);
         if (!this._nativeListenerBound) {
-            this._nativeListenerBound = true;
-            this._native.setOnAchievementStateUpdated((achId: string, prog: number, time: number) => {
-                for (const cb of this._achievementListeners) {
-                    cb(achId, prog, time);
+            this._native.setOnUpdated((state: AchievementState) => {
+                for (const listener of Array.from(this._achievementListeners)) {
+                    if (!this._achievementListeners.has(listener)) continue;
+                    try { listener({ ...state }); } catch (error) { console.error(error); }
                 }
             });
+            this._nativeListenerBound = true;
         }
-
         return () => {
-            this._achievementListeners.delete(callback);
-            if (this._achievementListeners.size === 0) {
+            this._achievementListeners.delete(subscription);
+            if (this._achievementListeners.size === 0 && this._nativeListenerBound) {
                 this._nativeListenerBound = false;
-                this._native.setOnAchievementStateUpdated(null);
+                this._native.setOnUpdated(null);
             }
         };
     }
 
-    /**
-     * @internal Called by GsServicesHelper during shutdown
-     */
+    /** @internal */
     _unbindAllEvents (): void {
         this._achievementListeners.clear();
         this._nativeListenerBound = false;
-        this._native.setOnAchievementStateUpdated(null);
+        this._native.setOnUpdated(null);
     }
 }
 
@@ -184,136 +186,212 @@ export class AchievementsHelper extends GsHelperBase {
 // Data types matching C++ structs in RemoteStorage.h
 // ────────────────────────────────────────────────────
 
-export interface FileInfo {
-    FileName: string;
-    FileSize: number;
-}
-
-export interface QuotaInfo {
-    TotalBytes: number;
-    AvailableBytes: number;
-}
-
-// ────────────────────────────────────────────────────
-// RemoteStorageHelper — wraps jsb.IRemoteStorage
-// ────────────────────────────────────────────────────
+export interface FileInfo { name: string; size: number; }
+export interface QuotaInfo { totalBytes: number; availableBytes: number; }
 
 export class RemoteStorageHelper extends GsHelperBase {
-    constructor (native: any, lifecycle: ServicesLifecycle) {
-        super(native, lifecycle, 'RemoteStorageHelper');
+    constructor (native: any, lifecycle: ServicesLifecycle) { super(native, lifecycle, 'RemoteStorageHelper'); }
+
+    private validateName (name: string): void {
+        if (typeof name !== 'string' || !name.length || name.includes('\0')) {
+            throw this.toError({ code: GsErrorCode.InvalidArgument, message: 'File name must be nonempty and contain no NUL' });
+        }
     }
 
-    writeFile (fileName: string, data: string): Promise<void> {
+    async writeFile (name: string, data: Uint8Array): Promise<void> {
         this.assertAlive();
+        this.validateName(name);
+        if (!(data instanceof Uint8Array)) throw this.toError({ code: GsErrorCode.InvalidArgument, message: 'File data must be a Uint8Array' });
         return new Promise((resolve, reject) => {
-            this._native.writeFile(fileName, data, {
+            this._native.writeFile(name, data, {
                 onSuccess: () => resolve(),
-                onFailure: (err: string) => reject(new Error(err)),
+                onFailure: (error: unknown) => reject(this.toError(error)),
             });
         });
     }
 
-    readFile (fileName: string): Promise<string> {
+    async readFile (name: string): Promise<Uint8Array> {
         this.assertAlive();
+        this.validateName(name);
         return new Promise((resolve, reject) => {
-            this._native.readFile(fileName, {
-                onSuccess: (data: string) => resolve(data),
-                onFailure: (err: string) => reject(new Error(err)),
+            this._native.readFile(name, {
+                onSuccess: (value: Uint8Array) => resolve(value),
+                onFailure: (error: unknown) => reject(this.toError(error)),
             });
         });
     }
 
-    deleteFile (fileName: string): Promise<void> {
+    async deleteFile (name: string): Promise<void> {
         this.assertAlive();
+        this.validateName(name);
         return new Promise((resolve, reject) => {
-            this._native.deleteFile(fileName, {
+            this._native.deleteFile(name, {
                 onSuccess: () => resolve(),
-                onFailure: (err: string) => reject(new Error(err)),
+                onFailure: (error: unknown) => reject(this.toError(error)),
             });
         });
     }
 
-    fileExists (fileName: string): boolean {
+    async getFileInfo (name: string): Promise<FileInfo | null> {
         this.assertAlive();
-        return this._native.fileExists(fileName);
+        this.validateName(name);
+        return new Promise((resolve, reject) => {
+            this._native.getFileInfo(name, {
+                onSuccess: (value: FileInfo | null) => resolve(value),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
     }
 
-    getFileSize (fileName: string): number {
+    async listFiles (): Promise<FileInfo[]> {
         this.assertAlive();
-        return this._native.getFileSize(fileName);
+        return new Promise((resolve, reject) => {
+            this._native.listFiles({
+                onSuccess: (value: FileInfo[]) => resolve(value),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
     }
 
-    getFileCount (): number {
+    async getQuota (): Promise<QuotaInfo> {
         this.assertAlive();
-        return this._native.getFileCount();
+        return new Promise((resolve, reject) => {
+            this._native.getQuota({
+                onSuccess: (value: QuotaInfo) => resolve(value),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
     }
 
-    getFileList (): FileInfo[] {
+    async writeText (name: string, text: string): Promise<void> {
         this.assertAlive();
-        const result = this._native.getFileList();
-        return result ? result.Files : [];
+        this.validateName(name);
+        if (typeof text !== 'string') throw this.toError({ code: GsErrorCode.InvalidArgument, message: 'Text must be a string' });
+        let data: Uint8Array;
+        try { data = new TextEncoder().encode(text); }
+        catch (error) { throw this.toError(error); }
+        return this.writeFile(name, data);
     }
 
-    getQuota (): QuotaInfo {
-        this.assertAlive();
-        const result = this._native.getQuota();
-        if (!result || !result.Success) throw new Error('Failed to query storage quota');
-        return { TotalBytes: result.TotalBytes, AvailableBytes: result.AvailableBytes };
+    async readText (name: string): Promise<string> {
+        const data = await this.readFile(name);
+        try { return new TextDecoder('utf-8').decode(data); }
+        catch (error) { throw this.toError(error); }
     }
 }
 
-// ────────────────────────────────────────────────────
-// StatsHelper — wraps jsb.IStats
-// ────────────────────────────────────────────────────
+export interface ResetStatsOptions { includeAchievements?: boolean; }
 
 export class StatsHelper extends GsHelperBase {
     constructor (native: any, lifecycle: ServicesLifecycle) {
         super(native, lifecycle, 'StatsHelper');
     }
 
-    setStatInt (name: string, value: number): Promise<void> {
+    private validateName (name: string): void {
+        if (typeof name !== 'string' || !name.length || name.includes('\0')) {
+            throw this.toError({ code: GsErrorCode.InvalidArgument, message: 'Invalid stat name' });
+        }
+    }
+
+    private validateValue (value: number, integer: boolean): void {
+        if (integer ? !Number.isSafeInteger(value) : !Number.isFinite(value)) {
+            throw this.toError({ code: GsErrorCode.InvalidArgument, message: integer ? 'Expected a safe integer' : 'Expected a finite number' });
+        }
+    }
+
+    async getInt (name: string): Promise<number> {
         this.assertAlive();
+        this.validateName(name);
         return new Promise((resolve, reject) => {
-            this._native.setStatInt(name, value, {
-                onSuccess: () => resolve(),
-                onFailure: (err: string) => reject(new Error(err)),
+            this._native.getInt(name, {
+                onSuccess: (value: number) => resolve(value),
+                onFailure: (error: unknown) => reject(this.toError(error)),
             });
         });
     }
 
-    setStatFloat (name: string, value: number): Promise<void> {
+    async getFloat (name: string): Promise<number> {
         this.assertAlive();
+        this.validateName(name);
         return new Promise((resolve, reject) => {
-            this._native.setStatFloat(name, value, {
-                onSuccess: () => resolve(),
-                onFailure: (err: string) => reject(new Error(err)),
+            this._native.getFloat(name, {
+                onSuccess: (value: number) => resolve(value),
+                onFailure: (error: unknown) => reject(this.toError(error)),
             });
         });
     }
 
-    getStatInt (name: string): { Success: boolean, Value: number } {
+    async setInt (name: string, value: number): Promise<void> {
         this.assertAlive();
-        return this._native.getStatInt(name);
-    }
-
-    getStatFloat (name: string): { Success: boolean, Value: number } {
-        this.assertAlive();
-        return this._native.getStatFloat(name);
-    }
-
-    storeStats (): Promise<void> {
-        this.assertAlive();
+        this.validateName(name);
+        this.validateValue(value, true);
         return new Promise((resolve, reject) => {
-            this._native.storeStats({
+            this._native.setInt(name, value, {
                 onSuccess: () => resolve(),
-                onFailure: (err: string) => reject(new Error(err)),
+                onFailure: (error: unknown) => reject(this.toError(error)),
             });
         });
     }
 
-    resetAllStats (achievementsToo: boolean): boolean {
+    async setFloat (name: string, value: number): Promise<void> {
         this.assertAlive();
-        return this._native.resetAllStats(achievementsToo);
+        this.validateName(name);
+        this.validateValue(value, false);
+        return new Promise((resolve, reject) => {
+            this._native.setFloat(name, value, {
+                onSuccess: () => resolve(),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
+    }
+
+    async incrementInt (name: string, delta: number): Promise<void> {
+        this.assertAlive();
+        this.validateName(name);
+        this.validateValue(delta, true);
+        return new Promise((resolve, reject) => {
+            this._native.incrementInt(name, delta, {
+                onSuccess: () => resolve(),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
+    }
+
+    async incrementFloat (name: string, delta: number): Promise<void> {
+        this.assertAlive();
+        this.validateName(name);
+        this.validateValue(delta, false);
+        return new Promise((resolve, reject) => {
+            this._native.incrementFloat(name, delta, {
+                onSuccess: () => resolve(),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
+    }
+
+    async flush (): Promise<void> {
+        this.assertAlive();
+
+        return new Promise((resolve, reject) => {
+            this._native.flush({
+                onSuccess: () => resolve(),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
+    }
+
+    async resetAll (options: ResetStatsOptions = {}): Promise<void> {
+        this.assertAlive();
+        if (!options || typeof options !== 'object'
+            || (options.includeAchievements !== undefined && typeof options.includeAchievements !== 'boolean')) {
+            throw this.toError({ code: GsErrorCode.InvalidArgument, message: 'Invalid reset options' });
+        }
+        return new Promise((resolve, reject) => {
+            this._native.resetAll(options.includeAchievements ?? false, {
+                onSuccess: () => resolve(),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
     }
 }
 
@@ -321,43 +399,45 @@ export class StatsHelper extends GsHelperBase {
 // UtilsHelper — wraps jsb.IUtils
 // ────────────────────────────────────────────────────
 
+export interface DiagnosticMessage { level: number; message: string; }
+
 export class UtilsHelper extends GsHelperBase {
-    private _warningListeners = new Set<(severity: number, message: string) => void>();
+    private _listeners = new Set<(message: DiagnosticMessage) => void>();
     private _nativeListenerBound = false;
 
     constructor (native: any, lifecycle: ServicesLifecycle) {
         super(native, lifecycle, 'UtilsHelper');
     }
 
-    onWarningMessage (callback: (severity: number, message: string) => void): () => void {
+    onDiagnostic (callback: (message: DiagnosticMessage) => void): () => void {
         this.assertAlive();
-        this._warningListeners.add(callback);
-
+        if (typeof callback !== 'function') throw this.toError({ code: GsErrorCode.InvalidArgument, message: 'Expected an event listener' });
+        // Each registration owns its unsubscribe token, even for the same callback.
+        const subscription = (message: DiagnosticMessage): void => callback(message);
+        this._listeners.add(subscription);
         if (!this._nativeListenerBound) {
-            this._nativeListenerBound = true;
-            this._native.setWarningMessageHook((sev: number, msg: string) => {
-                for (const cb of this._warningListeners) {
-                    cb(sev, msg);
+            this._native.setOnDiagnostic((message: DiagnosticMessage) => {
+                for (const listener of Array.from(this._listeners)) {
+                    if (!this._listeners.has(listener)) continue;
+                    try { listener({ ...message }); } catch (error) { console.error(error); }
                 }
             });
+            this._nativeListenerBound = true;
         }
-
         return () => {
-            this._warningListeners.delete(callback);
-            if (this._warningListeners.size === 0) {
+            this._listeners.delete(subscription);
+            if (this._listeners.size === 0 && this._nativeListenerBound) {
                 this._nativeListenerBound = false;
-                this._native.setWarningMessageHook(null);
+                this._native.setOnDiagnostic(null);
             }
         };
     }
 
-    /**
-     * @internal Called by GsServicesHelper during shutdown
-     */
+    /** @internal */
     _unbindAllEvents (): void {
-        this._warningListeners.clear();
+        this._listeners.clear();
         this._nativeListenerBound = false;
-        this._native.setWarningMessageHook(null);
+        this._native.setOnDiagnostic(null);
     }
 }
 
@@ -365,114 +445,158 @@ export class UtilsHelper extends GsHelperBase {
 // FriendsHelper — wraps jsb.IFriends
 // ────────────────────────────────────────────────────
 
-export interface AvatarImage {
-    width: number;
-    height: number;
-    data: ArrayBuffer;
-}
-
-export interface FriendInfo {
-    userId: string;
-    personaName: string;
-    nickname: string;
-    personaState: number;
-}
-
-export interface FriendsGroupInfo {
-    groupId: number;
-    groupName: string;
-    members: string[];
-}
+export interface UserProfile { userId: string; displayName: string; }
+export interface FriendInfo extends UserProfile { nickname: string | null; presence: number; }
+export interface AvatarImage { width: number; height: number; data: Uint8Array; }
+export interface FriendGroup { id: string; displayName: string; memberIds: string[]; }
+export interface JoinRequest { userId: string; connectionString: string; }
 
 export class FriendsHelper extends GsHelperBase {
-    private _joinListeners = new Set<(friendId: string, connectString: string) => void>();
+    private _joinListeners = new Set<(request: JoinRequest) => void>();
     private _nativeListenerBound = false;
 
     constructor (native: any, lifecycle: ServicesLifecycle) {
         super(native, lifecycle, 'FriendsHelper');
     }
 
-    getPersonaName (): string {
-        this.assertAlive();
-        return this._native.getPersonaName();
+    private validateText (value: string, label: string, allowEmpty = false): void {
+        if (typeof value !== 'string' || (!allowEmpty && !value.length) || value.includes('\0')) {
+            throw this.toError({ code: GsErrorCode.InvalidArgument, message: label + ' is invalid' });
+        }
     }
 
-    getFriends (friendFlags: number): FriendInfo[] {
+    async getLocalUser (): Promise<UserProfile> {
         this.assertAlive();
-        const result = this._native.getFriends(friendFlags);
-        return result ? result.Friends : [];
-    }
 
-    requestAvatar (userId: string, size: number): Promise<AvatarImage> {
-        this.assertAlive();
         return new Promise((resolve, reject) => {
-            this._native.requestAvatar(userId, size, {
-                onSuccess: (img: AvatarImage) => resolve(img),
-                onFailure: (err: string) => reject(new Error(err)),
+            this._native.getLocalUser({
+                onSuccess: (value: UserProfile) => resolve(value),
+                onFailure: (error: unknown) => reject(this.toError(error)),
             });
         });
     }
 
-    getFriendsGroups (): FriendsGroupInfo[] {
+    async getFriends (): Promise<FriendInfo[]> {
         this.assertAlive();
-        const result = this._native.getFriendsGroups();
-        return result ? result.Groups : [];
+
+        return new Promise((resolve, reject) => {
+            this._native.getFriends({
+                onSuccess: (value: FriendInfo[]) => resolve(value),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
     }
 
-    setRichPresence (key: string, value: string): boolean {
+    async getAvatar (userId: string, size: number = 1): Promise<AvatarImage | null> {
         this.assertAlive();
-        return this._native.setRichPresence(key, value);
+        this.validateText(userId, 'User ID');
+        if (!Number.isInteger(size) || size < 0 || size > 2) throw this.toError({ code: GsErrorCode.InvalidArgument, message: 'Invalid avatar size' });
+        return new Promise((resolve, reject) => {
+            this._native.getAvatar(userId, size, {
+                onSuccess: (value: AvatarImage | null) => resolve(value),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
     }
 
-    clearRichPresence (): void {
+    async getGroups (): Promise<FriendGroup[]> {
         this.assertAlive();
-        this._native.clearRichPresence();
+
+        return new Promise((resolve, reject) => {
+            this._native.getGroups({
+                onSuccess: (value: FriendGroup[]) => resolve(value),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
     }
 
-    getFriendRichPresence (userId: string, key: string): string {
+    async setRichPresence (key: string, value: string): Promise<void> {
         this.assertAlive();
-        return this._native.getFriendRichPresence(userId, key);
+        this.validateText(key, 'Presence key');
+        this.validateText(value, 'Presence value', true);
+        return new Promise((resolve, reject) => {
+            this._native.setRichPresence(key, value, {
+                onSuccess: () => resolve(),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
     }
 
-    activateGameOverlay (dialog: number): void {
+    async clearRichPresence (): Promise<void> {
         this.assertAlive();
-        this._native.activateGameOverlay(dialog);
+
+        return new Promise((resolve, reject) => {
+            this._native.clearRichPresence({
+                onSuccess: () => resolve(),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
     }
 
-    activateGameOverlayToWebPage (url: string): void {
+    async getRichPresence (userId: string, key: string): Promise<string | null> {
         this.assertAlive();
-        this._native.activateGameOverlayToWebPage(url);
+        this.validateText(userId, 'User ID');
+        this.validateText(key, 'Presence key');
+        return new Promise((resolve, reject) => {
+            this._native.getRichPresence(userId, key, {
+                onSuccess: (value: string | null) => resolve(value),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
     }
 
-    onGameRichPresenceJoinRequested (callback: (friendId: string, connectString: string) => void): () => void {
+    async openOverlay (dialog: number): Promise<void> {
         this.assertAlive();
-        this._joinListeners.add(callback);
+        if (!Number.isInteger(dialog) || dialog < 0 || dialog > 6) throw this.toError({ code: GsErrorCode.InvalidArgument, message: 'Invalid overlay page' });
+        return new Promise((resolve, reject) => {
+            this._native.openOverlay(dialog, {
+                onSuccess: () => resolve(),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
+    }
 
+    async openWebPage (url: string): Promise<void> {
+        this.assertAlive();
+        this.validateText(url, 'URL');
+        if (!/^https?:\/\//.test(url)) throw this.toError({ code: GsErrorCode.InvalidArgument, message: 'Expected an HTTP or HTTPS URL' });
+        return new Promise((resolve, reject) => {
+            this._native.openWebPage(url, {
+                onSuccess: () => resolve(),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
+    }
+
+    onJoinRequested (callback: (request: JoinRequest) => void): () => void {
+        this.assertAlive();
+        if (typeof callback !== 'function') throw this.toError({ code: GsErrorCode.InvalidArgument, message: 'Expected an event listener' });
+        // Each registration owns its unsubscribe token, even for the same callback.
+        const subscription = (request: JoinRequest): void => callback(request);
+        this._joinListeners.add(subscription);
         if (!this._nativeListenerBound) {
-            this._nativeListenerBound = true;
-            this._native.setOnGameRichPresenceJoinRequested((fid: string, connectStr: string) => {
-                for (const cb of this._joinListeners) {
-                    cb(fid, connectStr);
+            this._native.setOnJoinRequested((request: JoinRequest) => {
+                for (const listener of Array.from(this._joinListeners)) {
+                    if (!this._joinListeners.has(listener)) continue;
+                    try { listener({ ...request }); } catch (error) { console.error(error); }
                 }
             });
+            this._nativeListenerBound = true;
         }
-
         return () => {
-            this._joinListeners.delete(callback);
-            if (this._joinListeners.size === 0) {
+            this._joinListeners.delete(subscription);
+            if (this._joinListeners.size === 0 && this._nativeListenerBound) {
                 this._nativeListenerBound = false;
-                this._native.setOnGameRichPresenceJoinRequested(null);
+                this._native.setOnJoinRequested(null);
             }
         };
     }
 
-    /**
-     * @internal Called by GsServicesHelper during shutdown
-     */
+    /** @internal */
     _unbindAllEvents (): void {
         this._joinListeners.clear();
         this._nativeListenerBound = false;
-        this._native.setOnGameRichPresenceJoinRequested(null);
+        this._native.setOnJoinRequested(null);
     }
 }
 
@@ -491,21 +615,45 @@ export class GsServicesHelper {
 
     constructor (native: any) {
         this._native = native;
-        this._lifecycle = new ServicesLifecycle(native);
+        this._lifecycle = new ServicesLifecycle(native, native.getServicesProvider());
     }
 
     private assertAlive (): void {
         this._lifecycle.assertAlive('GsServicesHelper');
     }
 
-    restartAppIfNecessary (appId: number | string): boolean {
+    async restartAppIfNecessary (appId: number | string): Promise<boolean> {
         this.assertAlive();
-        return this._native.restartAppIfNecessary(appId);
+        const valid = typeof appId === 'number'
+            ? Number.isInteger(appId) && appId >= 0 && appId <= 0xFFFFFFFF
+            : typeof appId === 'string' && appId.length > 0 && !appId.includes('\0');
+        if (!valid) throw new GsError(GsErrorCode.InvalidArgument, 'Invalid app ID', this._lifecycle.provider);
+        return new Promise((resolve, reject) => {
+            this._native.restartAppIfNecessary(appId, {
+                onSuccess: (required: boolean) => resolve(required),
+                onFailure: (error: unknown) => reject(toGsError(error, this._lifecycle.provider)),
+            });
+        });
     }
 
-    init (): boolean {
+    async init (): Promise<void> {
         this.assertAlive();
-        return this._native.init();
+        return new Promise((resolve, reject) => {
+            this._native.init({
+                onSuccess: () => resolve(),
+                onFailure: (error: unknown) => reject(toGsError(error, this._lifecycle.provider)),
+            });
+        });
+    }
+
+    getState (): number { return this._native.getState(); }
+
+    hasModule (module: number): boolean {
+        this._lifecycle.assertReady('hasModule');
+        if (!Number.isInteger(module) || module < 0 || module > 4) {
+            throw new GsError(GsErrorCode.InvalidArgument, 'Invalid module', this._lifecycle.provider);
+        }
+        return this._native.hasModule(module);
     }
 
     /** @internal Used to discard a cached wrapper closed by native lifecycle cleanup. */
@@ -542,71 +690,68 @@ export class GsServicesHelper {
         }
     }
 
-    getServicesProvider (): number {
-        this.assertAlive();
-        return this._native.getServicesProvider();
-    }
+    getServicesProvider (): number { return this._lifecycle.provider; }
 
     achievements (): AchievementsHelper {
-        this.assertAlive();
+        this._lifecycle.assertReady('achievements');
         if (!this._achievements) {
             const native = this._native.getAchievementsInterface();
             if (native) {
                 this._achievements = new AchievementsHelper(native, this._lifecycle);
             } else {
-                throw new Error('[gs] Achievements interface is unavailable. Did you forget to call init() or did init() fail?');
+                throw new GsError(GsErrorCode.NotSupported, '[gs] Achievements is not supported by this session', this._lifecycle.provider);
             }
         }
         return this._achievements;
     }
 
     friends (): FriendsHelper {
-        this.assertAlive();
+        this._lifecycle.assertReady('friends');
         if (!this._friends) {
             const native = this._native.getFriendsInterface();
             if (native) {
                 this._friends = new FriendsHelper(native, this._lifecycle);
             } else {
-                throw new Error('[gs] Friends interface is unavailable. Did you forget to call init() or did init() fail?');
+                throw new GsError(GsErrorCode.NotSupported, '[gs] Friends is not supported by this session', this._lifecycle.provider);
             }
         }
         return this._friends;
     }
 
     remoteStorage (): RemoteStorageHelper {
-        this.assertAlive();
+        this._lifecycle.assertReady('remoteStorage');
         if (!this._remoteStorage) {
             const native = this._native.getRemoteStorageInterface();
             if (native) {
                 this._remoteStorage = new RemoteStorageHelper(native, this._lifecycle);
             } else {
-                throw new Error('[gs] RemoteStorage interface is unavailable. Did you forget to call init() or did init() fail?');
+                throw new GsError(GsErrorCode.NotSupported, '[gs] RemoteStorage is not supported by this session', this._lifecycle.provider);
             }
         }
         return this._remoteStorage;
     }
 
     stats (): StatsHelper {
-        this.assertAlive();
+        this._lifecycle.assertReady('stats');
         if (!this._stats) {
             const native = this._native.getStatsInterface();
             if (native) {
                 this._stats = new StatsHelper(native, this._lifecycle);
             } else {
-                throw new Error('[gs] Stats interface is unavailable. Did you forget to call init() or did init() fail?');
+                throw new GsError(GsErrorCode.NotSupported, '[gs] Stats is not supported by this session', this._lifecycle.provider);
             }
         }
         return this._stats;
     }
 
     utils (): UtilsHelper {
-        this.assertAlive();
+        this._lifecycle.assertReady('utils');
         if (!this._utils) {
             const native = this._native.getUtilsInterface();
             if (native) {
                 this._utils = new UtilsHelper(native, this._lifecycle);
             } else {
-                throw new Error('[gs] Utils interface is unavailable. Did you forget to call init() or did init() fail?');
+                throw new GsError(GsErrorCode.NotSupported, '[gs] Utils is not supported by this session', this._lifecycle.provider);
             }
         }
         return this._utils;
@@ -622,6 +767,9 @@ const _servicesCache = new Map<number, GsServicesHelper>();
 export function createServices (
     servicesType: number = jsb.GsServicesType.Steam,
 ): GsServicesHelper | null {
+    if (!Number.isInteger(servicesType) || servicesType < 0 || servicesType > 255) {
+        throw new GsError(GsErrorCode.InvalidArgument, 'Invalid services provider', servicesType);
+    }
     const cached = _servicesCache.get(servicesType);
     if (cached && !cached._isClosed()) {
         return cached;

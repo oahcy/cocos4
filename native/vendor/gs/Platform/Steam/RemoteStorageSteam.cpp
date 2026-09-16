@@ -24,144 +24,121 @@
 
 #include "RemoteStorageSteam.h"
 
-#include "base/Log.h"
-#include <iostream>
-
 namespace cc::Gs {
-
+namespace {
+bool validName(const std::string& name) { return !name.empty() && name.find('\0') == std::string::npos; }
+GsError invalidName() { return {GsErrorCode::InvalidArgument, "File name must be nonempty and contain no NUL"}; }
+GsError sdkError(const char* operation, EResult result) {
+    return {result == k_EResultFileNotFound ? GsErrorCode::NotFound : GsErrorCode::PlatformError,
+            operation, std::to_string(static_cast<int>(result))};
+}
+}
 void RemoteStorageSteam::shutdown() {
-    // Cancel in-flight async calls before SteamAPI_Shutdown. This makes both
-    // CCallResult members inert, so their destructors are safe no-ops later.
-    // The session has already cancelled requests before backend shutdown.
     _writeCallResult.Cancel();
-    if (_pendingWriteCallback) {
-        CC_LOG_WARNING("[RemoteStorage] Pending write cancelled during shutdown");
-        _pendingWriteCallback.reset();
-    }
     _readCallResult.Cancel();
-    if (_pendingReadCallback) {
-        CC_LOG_WARNING("[RemoteStorage] Pending read cancelled during shutdown");
-        _pendingReadCallback.reset();
-    }
+    _pendingWriteCallback.reset();
+    _pendingReadCallback.reset();
+    std::vector<uint8_t>().swap(_pendingWriteData.bytes);
 }
-
-void RemoteStorageSteam::writeFile(const std::string& fileName, const std::string& data, OnComplete callback) {
-    // Prevent memory leak: fail the new request if the component is busy.
-    // Overwriting a pending callback causes the previous JS promise to hang indefinitely.
-    if (_writeCallResult.IsActive()) {
-        callback.failure("RemoteStorage is busy. Please wait for the previous write to complete.");
-        return;
+void RemoteStorageSteam::writeFile(const std::string& name, const FileData& data, OnComplete callback) {
+    if (!validName(name)) { callback.failure(invalidName()); return; }
+    auto* storage = SteamRemoteStorage();
+    if (!storage) { callback.failure({GsErrorCode::NotReady, "Steam storage unavailable"}); return; }
+    if (_writeCallResult.IsActive()) { callback.failure({GsErrorCode::Busy, "A file write is already pending"}); return; }
+    if (data.bytes.size() > k_unMaxCloudFileChunkSize) { callback.failure({GsErrorCode::InvalidArgument, "File exceeds Steam single-write limit"}); return; }
+    _pendingWriteData = data;
+    static const uint8_t empty = 0;
+    const auto call = storage->FileWriteAsync(name.c_str(), data.bytes.empty() ? &empty : _pendingWriteData.bytes.data(), static_cast<uint32>(data.bytes.size()));
+    if (call == k_uAPICallInvalid) {
+        std::vector<uint8_t>().swap(_pendingWriteData.bytes);
+        callback.failure({GsErrorCode::PlatformError, "FileWriteAsync rejected"}); return;
     }
-
-    SteamAPICall_t apiCall = SteamRemoteStorage()->FileWriteAsync(
-        fileName.c_str(), data.data(), static_cast<uint32>(data.size()));
-
-    if (apiCall == k_uAPICallInvalid) {
-        callback.failure("FileWriteAsync call failed: " + fileName);
-        return;
-    }
-
     _pendingWriteCallback = std::move(callback);
-    _writeCallResult.Set(apiCall, this, &RemoteStorageSteam::onWriteComplete);
+    _writeCallResult.Set(call, this, &RemoteStorageSteam::onWriteComplete);
 }
-
-void RemoteStorageSteam::onWriteComplete(RemoteStorageFileWriteAsyncComplete_t* pResult, bool bIOFailure) {
-    if (bIOFailure || pResult->m_eResult != k_EResultOK) {
-        _pendingWriteCallback.failure(bIOFailure ? "FileWriteAsync IO failure" : "FileWriteAsync failed, EResult=" + std::to_string(pResult->m_eResult));
-    } else {
-        _pendingWriteCallback.success();
-    }
+void RemoteStorageSteam::onWriteComplete(RemoteStorageFileWriteAsyncComplete_t* result, bool ioFailure) {
+    auto callback = std::move(_pendingWriteCallback);
+    _pendingWriteCallback.reset();
+    std::vector<uint8_t>().swap(_pendingWriteData.bytes);
+    if (ioFailure || !result) callback.failure({GsErrorCode::PlatformError, "File write IO failure"});
+    else if (result->m_eResult != k_EResultOK) callback.failure(sdkError("File write failed", result->m_eResult));
+    else callback.success();
 }
-
-void RemoteStorageSteam::readFile(const std::string& fileName, OnReadFile callback) {
-    // Prevent memory leak: fail the new request if the component is busy.
-    // Overwriting a pending callback causes the previous JS promise to hang indefinitely.
-    if (_readCallResult.IsActive()) {
-        callback.failure("RemoteStorage is busy. Please wait for the previous read to complete.");
-        return;
+void RemoteStorageSteam::readFile(const std::string& name, OnReadFile callback) {
+    if (!validName(name)) { callback.failure(invalidName()); return; }
+    auto* storage = SteamRemoteStorage();
+    if (!storage) { callback.failure({GsErrorCode::NotReady, "Steam storage unavailable"}); return; }
+    if (_readCallResult.IsActive()) { callback.failure({GsErrorCode::Busy, "A file read is already pending"}); return; }
+    if (!storage->FileExists(name.c_str())) { callback.failure({GsErrorCode::NotFound, "File not found: " + name}); return; }
+    const auto size = storage->GetFileSize(name.c_str());
+    if (size < 0 || static_cast<uint32>(size) > k_unMaxCloudFileChunkSize) {
+        callback.failure({GsErrorCode::PlatformError, "Invalid or unsupported file size"}); return;
     }
-
-    int32_t fileSize = SteamRemoteStorage()->GetFileSize(fileName.c_str());
-    if (fileSize < 0 || !SteamRemoteStorage()->FileExists(fileName.c_str())) {
-        callback.failure("File not found: " + fileName);
-        return;
-    }
-    if (fileSize == 0) {
-        callback.success("");
-        return;
-    }
-
-    SteamAPICall_t apiCall = SteamRemoteStorage()->FileReadAsync(
-        fileName.c_str(), 0, static_cast<uint32>(fileSize));
-
-    if (apiCall == k_uAPICallInvalid) {
-        callback.failure("FileReadAsync call failed: " + fileName);
-        return;
-    }
-
+    if (size == 0) { callback.success(FileData{}); return; }
+    const auto call = storage->FileReadAsync(name.c_str(), 0, static_cast<uint32>(size));
+    if (call == k_uAPICallInvalid) { callback.failure({GsErrorCode::PlatformError, "FileReadAsync rejected"}); return; }
     _pendingReadCallback = std::move(callback);
-    _readCallResult.Set(apiCall, this, &RemoteStorageSteam::onReadComplete);
+    _readCallResult.Set(call, this, &RemoteStorageSteam::onReadComplete);
 }
-
-void RemoteStorageSteam::onReadComplete(RemoteStorageFileReadAsyncComplete_t* pResult, bool bIOFailure) {
-    if (bIOFailure || pResult->m_eResult != k_EResultOK) {
-        _pendingReadCallback.failure(bIOFailure ? "FileReadAsync IO failure" : "FileReadAsync failed, EResult=" + std::to_string(pResult->m_eResult));
-        return;
+void RemoteStorageSteam::onReadComplete(RemoteStorageFileReadAsyncComplete_t* result, bool ioFailure) {
+    auto callback = std::move(_pendingReadCallback);
+    _pendingReadCallback.reset();
+    if (ioFailure || !result) { callback.failure({GsErrorCode::PlatformError, "File read IO failure"}); return; }
+    if (result->m_eResult != k_EResultOK) { callback.failure(sdkError("File read failed", result->m_eResult)); return; }
+    auto* storage = SteamRemoteStorage();
+    if (!storage || result->m_cubRead > k_unMaxCloudFileChunkSize) {
+        callback.failure({GsErrorCode::PlatformError, "Invalid file read result"}); return;
     }
-
-    std::string buffer(pResult->m_cubRead, '\0');
-    if (SteamRemoteStorage()->FileReadAsyncComplete(
-            pResult->m_hFileReadAsync, buffer.data(), pResult->m_cubRead)) {
-        _pendingReadCallback.success(buffer);
-    } else {
-        _pendingReadCallback.failure("FileReadAsyncComplete failed");
+    FileData data;
+    data.bytes.resize(result->m_cubRead);
+    uint8_t empty = 0;
+    if (!storage->FileReadAsyncComplete(result->m_hFileReadAsync, data.bytes.empty() ? &empty : data.bytes.data(), result->m_cubRead)) {
+        callback.failure({GsErrorCode::PlatformError, "FileReadAsyncComplete failed"}); return;
     }
+    callback.success(std::move(data));
 }
-
-void RemoteStorageSteam::deleteFile(const std::string& fileName, OnComplete callback) {
-    bool ok = SteamRemoteStorage()->FileDelete(fileName.c_str());
-    if (ok) {
-        callback.success();
-    } else {
-        callback.failure("FileDelete failed: " + fileName);
+void RemoteStorageSteam::deleteFile(const std::string& name, OnComplete callback) {
+    if (!validName(name)) { callback.failure(invalidName()); return; }
+    auto* storage = SteamRemoteStorage();
+    if (!storage) { callback.failure({GsErrorCode::NotReady, "Steam storage unavailable"}); return; }
+    // Avoid a pending write recreating the file after a successful deletion.
+    if (_writeCallResult.IsActive() || _readCallResult.IsActive()) {
+        callback.failure({GsErrorCode::Busy, "File transfer is pending"}); return;
     }
+    if (!storage->FileExists(name.c_str())) { callback.success(); return; }
+    if (storage->FileDelete(name.c_str())) callback.success();
+    else callback.failure({GsErrorCode::PlatformError, "FileDelete failed"});
 }
-
-bool RemoteStorageSteam::fileExists(const std::string& fileName) {
-    return SteamRemoteStorage()->FileExists(fileName.c_str());
+void RemoteStorageSteam::getFileInfo(const std::string& name, OnFileInfo callback) {
+    if (!validName(name)) { callback.failure(invalidName()); return; }
+    auto* storage = SteamRemoteStorage();
+    if (!storage) { callback.failure({GsErrorCode::NotReady, "Steam storage unavailable"}); return; }
+    if (!storage->FileExists(name.c_str())) { callback.success(std::nullopt); return; }
+    const auto size = storage->GetFileSize(name.c_str());
+    if (size < 0) { callback.failure({GsErrorCode::PlatformError, "File size query failed"}); return; }
+    callback.success(FileInfo{name, static_cast<uint64_t>(size)});
 }
-
-int32_t RemoteStorageSteam::getFileSize(const std::string& fileName) {
-    return SteamRemoteStorage()->GetFileSize(fileName.c_str());
-}
-
-int32_t RemoteStorageSteam::getFileCount() {
-    return SteamRemoteStorage()->GetFileCount();
-}
-
-FileList RemoteStorageSteam::getFileList() {
-    FileList result;
-    int32_t count = SteamRemoteStorage()->GetFileCount();
-    result.Files.reserve(count);
-    for (int32_t i = 0; i < count; ++i) {
-        int32_t fileSize = 0;
-        const char* name = SteamRemoteStorage()->GetFileNameAndSize(i, &fileSize);
-        FileInfo info;
-        info.FileName = name;
-        info.FileSize = fileSize;
-        result.Files.push_back(std::move(info));
+void RemoteStorageSteam::listFiles(OnFileList callback) {
+    auto* storage = SteamRemoteStorage();
+    if (!storage) { callback.failure({GsErrorCode::NotReady, "Steam storage unavailable"}); return; }
+    const auto count = storage->GetFileCount();
+    if (count < 0) { callback.failure({GsErrorCode::PlatformError, "File list query failed"}); return; }
+    std::vector<FileInfo> files;
+    for (int32 i = 0; i < count; ++i) {
+        int32 size = 0;
+        const char* name = storage->GetFileNameAndSize(i, &size);
+        if (!name || !*name || size < 0) { callback.failure({GsErrorCode::PlatformError, "File metadata query failed"}); return; }
+        files.push_back({name, static_cast<uint64_t>(size)});
     }
-    return result;
+    callback.success(std::move(files));
 }
-
-QuotaInfo RemoteStorageSteam::getQuota() {
-    QuotaInfo info;
-    info.Success = SteamRemoteStorage()->GetQuota(&info.TotalBytes, &info.AvailableBytes);
-    if (!info.Success) {
-        info.TotalBytes = 0;
-        info.AvailableBytes = 0;
+void RemoteStorageSteam::getQuota(OnQuota callback) {
+    auto* storage = SteamRemoteStorage();
+    if (!storage) { callback.failure({GsErrorCode::NotReady, "Steam storage unavailable"}); return; }
+    QuotaInfo quota;
+    if (!storage->GetQuota(&quota.totalBytes, &quota.availableBytes)) {
+        callback.failure({GsErrorCode::PlatformError, "Storage quota query failed"}); return;
     }
-    return info;
+    callback.success(quota);
 }
-
 } // namespace cc::Gs

@@ -23,6 +23,7 @@
  THE SOFTWARE.
 */
 import './core/enums';
+import { GsError as ErrorClass, GsErrorCode as ErrorCodes } from './core/errors';
 
 import {
     GsServicesHelper,
@@ -37,10 +38,14 @@ import {
 declare const jsb: any;
 
 export namespace gs {
+    export const GsError = ErrorClass;
+    export const GsErrorCode = ErrorCodes;
     export const ServicesProvider = jsb.GsServicesType;
-    export const PersonaState = jsb.PersonaState;
+    export const ServicesState = jsb.ServicesState;
+    export const ServicesModule = jsb.ServicesModule;
+    export const DiagnosticLevel = jsb.DiagnosticLevel;
+    export const PresenceState = jsb.PresenceState;
     export const AvatarSize = jsb.AvatarSize;
-    export const FriendFlags = jsb.FriendFlags;
     export const OverlayDialog = jsb.OverlayDialog;
 
     export const getServices = createServices;

@@ -34,33 +34,16 @@ if (JSB && jsb.IGsServices) {
         Steam: 1,
         Epic: 2, // Not implemented yet — no native module/factory registered.
     };
-    // cc::Gs::PersonaState in Framework/Friends.h
-    jsb.PersonaState = {
-        Offline: 0,
-        Online: 1,
-        Busy: 2,
-        Away: 3,
-        Snooze: 4,
-        LookingToTrade: 5,
-        LookingToPlay: 6,
-        Invisible: 7,
-    };
+    jsb.ServicesState = { Created: 0, Ready: 1, Closing: 2, Closed: 3 };
+    jsb.ServicesModule = { Achievements: 0, Friends: 1, RemoteStorage: 2, Stats: 3, Utils: 4 };
+    jsb.DiagnosticLevel = { Unknown: 0, Info: 1, Warning: 2, Error: 3 };
+    // cc::Gs::PresenceState in Framework/Friends.h
+    jsb.PresenceState = { Unknown: 0, Offline: 1, Online: 2, Away: 3, Busy: 4 };
     // cc::Gs::AvatarSize in Framework/Friends.h
     jsb.AvatarSize = {
         Small: 0,
         Medium: 1,
         Large: 2,
-    };
-    // cc::Gs::FriendFlags in Framework/Friends.h
-    jsb.FriendFlags = {
-        None: 0,
-        Immediate: 1,
-        Blocked: 2,
-        FriendshipRequested: 4,
-        RequestingFriendship: 8,
-        ClanMember: 16,
-        OnGameServer: 32,
-        All: 0xFFFFFFFF,
     };
     // cc::Gs::OverlayDialog in Framework/Friends.h
     jsb.OverlayDialog = {

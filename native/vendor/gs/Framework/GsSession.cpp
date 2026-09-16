@@ -20,19 +20,26 @@ void GsModules::shutdown() {
 GsSession::GsSession(std::unique_ptr<GsPlatform> platform) : _platform(std::move(platform)) {}
 GsSession::~GsSession() { close(); }
 
-bool GsSession::init() {
-    if (isActive()) return true;
-    if (_state != State::Created || _dispatchDepth != 0) return false;
+void GsSession::init(OnComplete callback) {
+    if (isClosed() || isClosing()) { callback.failure({GsErrorCode::Cancelled, "Services closed"}); return; }
+    if (isActive()) {
+        Dispatch dispatch(*this);
+        callback.success();
+        return;
+    }
+    if (_dispatchDepth != 0) { callback.failure({GsErrorCode::Busy, "Services initialization is already in progress"}); return; }
     Dispatch dispatch(*this);
-    if (!_platform->initialize(_modules)) {
+    const auto error = _platform->initialize(_modules);
+    if (error) {
         _modules.shutdown();
-        return false;
+        callback.failure(isClosed() || isClosing() ? GsError{GsErrorCode::Cancelled, "Services closed"} : *error);
+        return;
     }
     _sdkInitialized = true;
-    if (_state != State::Created) return false;
-    _state = State::Active;
+    if (_state != State::Created) { callback.failure({GsErrorCode::Cancelled, "Services closed during initialization"}); return; }
+    _state = State::Ready;
     _gate->active = true;
-    return true;
+    callback.success();
 }
 
 void GsSession::close() {
@@ -49,7 +56,7 @@ void GsSession::finishClose() {
     // close/getServices calls cannot mutate this list or reopen this session.
     auto pending = std::move(_pending);
     for (auto& weak : pending) {
-        if (auto request = weak.lock()) request->cancel("Services closed");
+        if (auto request = weak.lock()) request->cancel({GsErrorCode::Cancelled, "Services closed"});
     }
     _modules.shutdown();
     if (_sdkInitialized) {
@@ -71,10 +78,14 @@ void GsSession::tick(float dt) {
     _platform->pump(dt);
 }
 
-bool GsSession::restartAppIfNecessary(const AppId& appId) {
-    if (_state != State::Created) return false;
+void GsSession::restartAppIfNecessary(const AppId& appId, OnRestartRequired callback) {
+    if (isClosed() || isClosing()) { callback.failure({GsErrorCode::Cancelled, "Services closed"}); return; }
+    if (_state != State::Created) {
+        callback.failure({GsErrorCode::InvalidArgument, "Launcher restart must be checked before init"}); return;
+    }
+    if (_dispatchDepth != 0) { callback.failure({GsErrorCode::Busy, "Services operation already in progress"}); return; }
     Dispatch dispatch(*this);
-    return _platform->restartAppIfNecessary(appId);
+    _platform->restartAppIfNecessary(appId, std::move(callback));
 }
 
 void GsSession::track(const std::shared_ptr<PendingCallback>& pending) {

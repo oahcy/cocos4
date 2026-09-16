@@ -8,11 +8,23 @@ namespace cc::Gs {
 
 class GsSession;
 
+enum class DiagnosticLevel : uint8_t { Unknown = 0, Info, Warning, Error };
+struct DiagnosticMessage {
+    DiagnosticLevel level = DiagnosticLevel::Unknown;
+    std::string message;
+};
+#ifdef SWIG
+using OnDiagnostic = EventDelegateBase;
+#else
+using OnDiagnostic = EventDelegate<DiagnosticMessage>;
+#endif
+
+
 // JSB facade: retains its original session, never the platform implementation.
 class IUtils final : public cc::RefCounted {
 public:
     ~IUtils() override;
-    void setWarningMessageHook(OnWarningMessage callback);
+    void setOnDiagnostic(OnDiagnostic callback);
 #ifndef SWIG
     explicit IUtils(cc::IntrusivePtr<GsSession> session);
 private:

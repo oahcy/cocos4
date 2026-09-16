@@ -1,5 +1,4 @@
 #pragma once
-
 #include <string>
 #include <cstdint>
 #include "commons/GsCallback.h"
@@ -7,34 +6,33 @@
 #include "base/Ptr.h"
 
 namespace cc::Gs {
-
 class GsSession;
+#ifdef SWIG
+using OnStatInt = AsyncCallbackBase;
+using OnStatFloat = AsyncCallbackBase;
+#else
+// Integer results use the JS Number transport; backends must return safe integers.
+// int64_t would be converted to a JS BigInt by the shared binding converters.
+using OnStatInt = AsyncCallback<double>;
+using OnStatFloat = AsyncCallback<double>;
+#endif
 
-struct StatIntResult {
-    bool Success = false;
-    int32_t Value = 0;
-};
-
-struct StatFloatResult {
-    bool Success = false;
-    float Value = 0.0f;
-};
-
-// JSB facade: retains its original session, never the platform implementation.
+// JSB facade retains its original session, never the platform backend.
 class IStats final : public cc::RefCounted {
 public:
     ~IStats() override;
-    void setStatInt(const std::string& name, int32_t value, OnComplete callback);
-    void setStatFloat(const std::string& name, float value, OnComplete callback);
-    StatIntResult getStatInt(const std::string& name);
-    StatFloatResult getStatFloat(const std::string& name);
-    void storeStats(OnComplete callback);
-    bool resetAllStats(bool achievementsToo);
+    void getInt(const std::string& name, OnStatInt callback);
+    void getFloat(const std::string& name, OnStatFloat callback);
+    void setInt(const std::string& name, int64_t value, OnComplete callback);
+    void setFloat(const std::string& name, double value, OnComplete callback);
+    void incrementInt(const std::string& name, int64_t delta, OnComplete callback);
+    void incrementFloat(const std::string& name, double delta, OnComplete callback);
+    void flush(OnComplete callback);
+    void resetAll(bool includeAchievements, OnComplete callback);
 #ifndef SWIG
     explicit IStats(cc::IntrusivePtr<GsSession> session);
 private:
     cc::IntrusivePtr<GsSession> _session;
 #endif
 };
-
 } // namespace cc::Gs

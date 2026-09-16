@@ -33,13 +33,15 @@ class GsServicesCommon final : public IGsServices {
 public:
     GsServicesCommon(GsServicesType provider, std::unique_ptr<GsPlatform> platform);
     ~GsServicesCommon() override;
-    bool init() override;
+    void init(OnComplete callback) override;
+    ServicesState getState() const override;
+    bool hasModule(ServicesModule module) const override;
     void destroy() override;
     void tick(float dt) override;
     bool isClosed() const override;
     bool isClosing() const override;
     GsServicesType getServicesProvider() const override { return _provider; }
-    bool restartAppIfNecessary(const AppId& appId) override;
+    void restartAppIfNecessary(const AppId& appId, OnRestartRequired callback) override;
     IntrusivePtr<IAchievements> getAchievementsInterface() override;
     IntrusivePtr<IFriends> getFriendsInterface() override;
     IntrusivePtr<IRemoteStorage> getRemoteStorageInterface() override;

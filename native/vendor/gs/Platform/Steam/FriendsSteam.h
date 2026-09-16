@@ -15,22 +15,16 @@ public:
     void shutdown() override;
     void expireAvatarRequests(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
 
-    std::string getPersonaName() override;
-
-    FriendListResult getFriends(FriendFlags friendFlags) override;
-
-    void requestAvatar(const AccountId& userId, AvatarSize size, OnAvatarLoaded callback) override;
-
-    FriendsGroupListResult getFriendsGroups() override;
-
-    bool setRichPresence(const std::string& key, const std::string& value) override;
-    void clearRichPresence() override;
-    std::string getFriendRichPresence(const AccountId& userId, const std::string& key) override;
-
-    void activateGameOverlay(OverlayDialog dialog) override;
-    void activateGameOverlayToWebPage(const std::string& url) override;
-
-    void setOnGameRichPresenceJoinRequested(OnGameRichPresenceJoinRequested delegate) override;
+    void getLocalUser(OnUserProfile callback) override;
+    void getFriends(OnFriends callback) override;
+    void getAvatar(const AccountId& userId, AvatarSize size, OnAvatarLoaded callback) override;
+    void getGroups(OnFriendGroups callback) override;
+    void setRichPresence(const std::string& key, const std::string& value, OnComplete callback) override;
+    void clearRichPresence(OnComplete callback) override;
+    void getRichPresence(const AccountId& userId, const std::string& key, OnPresenceValue callback) override;
+    void openOverlay(OverlayDialog dialog, OnComplete callback) override;
+    void openWebPage(const std::string& url, OnComplete callback) override;
+    void setOnJoinRequested(OnJoinRequested delegate) override;
 
 private:
     AvatarImage fetchAvatar(int handle);
@@ -45,7 +39,7 @@ private:
         std::chrono::steady_clock::time_point deadline;
     };
     std::vector<PendingAvatar> _pendingAvatars;
-    OnGameRichPresenceJoinRequested _gameRichPresenceJoinDelegate;
+    OnJoinRequested _gameRichPresenceJoinDelegate;
 };
 
 } // namespace cc::Gs

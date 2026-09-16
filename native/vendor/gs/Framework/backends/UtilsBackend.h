@@ -7,7 +7,7 @@ namespace cc::Gs {
 
 class IUtilsBackend : public GsBackend {
 public:
-    virtual void setWarningMessageHook(OnWarningMessage callback) = 0;
+    virtual void setOnDiagnostic(OnDiagnostic callback) = 0;
 };
 
 } // namespace cc::Gs

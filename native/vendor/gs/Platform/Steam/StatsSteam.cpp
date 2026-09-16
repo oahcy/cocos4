@@ -1,81 +1,112 @@
 #include "StatsSteam.h"
 
-#include "base/Log.h"
+#include <cmath>
+#include <limits>
 
 namespace cc::Gs {
+namespace {
+bool validName(const std::string& name) {
+    return !name.empty() && name.find('\0') == std::string::npos;
+}
+bool validFloat(double value) {
+    return std::isfinite(value) && std::abs(value) <= std::numeric_limits<float>::max();
+}
+constexpr int64_t MIN_INT = std::numeric_limits<int32_t>::min();
+constexpr int64_t MAX_INT = std::numeric_limits<int32_t>::max();
+} // namespace
 
-void StatsSteam::setStatInt(const std::string& name, int32_t value, OnComplete callback) {
+void StatsSteam::getInt(const std::string& name, OnStatInt callback) {
+    if (!validName(name)) { callback.failure({GsErrorCode::InvalidArgument, "Invalid stat name"}); return; }
     auto* stats = SteamUserStats();
-    if (!stats) {
-        callback.failure("SteamUserStats interface unavailable");
-        return;
+    if (!stats) { callback.failure({GsErrorCode::NotReady, "Stats unavailable"}); return; }
+    int32 value = 0;
+    if (!stats->GetStat(name.c_str(), &value)) {
+        // Steam does not distinguish a missing name, wrong type, or unavailable data.
+        callback.failure({GsErrorCode::PlatformError, "Integer stat lookup failed: " + name}); return;
     }
+    callback.success(value);
+}
+
+void StatsSteam::getFloat(const std::string& name, OnStatFloat callback) {
+    if (!validName(name)) { callback.failure({GsErrorCode::InvalidArgument, "Invalid stat name"}); return; }
+    auto* stats = SteamUserStats();
+    if (!stats) { callback.failure({GsErrorCode::NotReady, "Stats unavailable"}); return; }
+    float value = 0;
+    if (!stats->GetStat(name.c_str(), &value) || !std::isfinite(value)) {
+        callback.failure({GsErrorCode::PlatformError, "Float stat lookup failed: " + name}); return;
+    }
+    callback.success(value);
+}
+
+void StatsSteam::setInt(const std::string& name, int64_t value, OnComplete callback) {
+    if (!validName(name) || value < MIN_INT || value > MAX_INT) {
+        callback.failure({GsErrorCode::InvalidArgument, "Expected a stat name and signed 32-bit integer"}); return;
+    }
+    auto* stats = SteamUserStats();
+    if (!stats) { callback.failure({GsErrorCode::NotReady, "Stats unavailable"}); return; }
     if (!stats->SetStat(name.c_str(), static_cast<int32>(value))) {
-        callback.failure("SetStat(int) failed for: " + name);
-        return;
+        callback.failure({GsErrorCode::PlatformError, "Integer stat update rejected: " + name}); return;
     }
     callback.success();
 }
 
-void StatsSteam::setStatFloat(const std::string& name, float value, OnComplete callback) {
-    auto* stats = SteamUserStats();
-    if (!stats) {
-        callback.failure("SteamUserStats interface unavailable");
-        return;
+void StatsSteam::setFloat(const std::string& name, double value, OnComplete callback) {
+    if (!validName(name) || !validFloat(value)) {
+        callback.failure({GsErrorCode::InvalidArgument, "Expected a stat name and finite float32 value"}); return;
     }
-    if (!stats->SetStat(name.c_str(), value)) {
-        callback.failure("SetStat(float) failed for: " + name);
-        return;
+    auto* stats = SteamUserStats();
+    if (!stats) { callback.failure({GsErrorCode::NotReady, "Stats unavailable"}); return; }
+    if (!stats->SetStat(name.c_str(), static_cast<float>(value))) {
+        callback.failure({GsErrorCode::PlatformError, "Float stat update rejected: " + name}); return;
     }
     callback.success();
 }
 
-StatIntResult StatsSteam::getStatInt(const std::string& name) {
-    StatIntResult result;
+void StatsSteam::incrementInt(const std::string& name, int64_t delta, OnComplete callback) {
+    if (!validName(name)) { callback.failure({GsErrorCode::InvalidArgument, "Invalid stat name"}); return; }
     auto* stats = SteamUserStats();
-    if (!stats) return result;
-    int32 val = 0;
-    if (stats->GetStat(name.c_str(), &val)) {
-        result.Success = true;
-        result.Value = static_cast<int32_t>(val);
+    if (!stats) { callback.failure({GsErrorCode::NotReady, "Stats unavailable"}); return; }
+    int32 current = 0;
+    if (!stats->GetStat(name.c_str(), &current)) {
+        callback.failure({GsErrorCode::PlatformError, "Integer stat lookup failed: " + name}); return;
     }
-    return result;
+    // Check before addition, including calls made directly from native code.
+    if (delta < MIN_INT - current || delta > MAX_INT - current) {
+        callback.failure({GsErrorCode::InvalidArgument, "Integer stat increment would overflow"}); return;
+    }
+    // Read and write stay in this engine-thread dispatch. Not a cross-device atomic increment.
+    setInt(name, static_cast<int64_t>(current) + delta, std::move(callback));
 }
 
-StatFloatResult StatsSteam::getStatFloat(const std::string& name) {
-    StatFloatResult result;
-    auto* stats = SteamUserStats();
-    if (!stats) return result;
-    float val = 0.0f;
-    if (stats->GetStat(name.c_str(), &val)) {
-        result.Success = true;
-        result.Value = val;
+void StatsSteam::incrementFloat(const std::string& name, double delta, OnComplete callback) {
+    if (!validName(name) || !std::isfinite(delta)) {
+        callback.failure({GsErrorCode::InvalidArgument, "Expected a stat name and finite delta"}); return;
     }
-    return result;
+    auto* stats = SteamUserStats();
+    if (!stats) { callback.failure({GsErrorCode::NotReady, "Stats unavailable"}); return; }
+    float current = 0;
+    if (!stats->GetStat(name.c_str(), &current) || !std::isfinite(current)) {
+        callback.failure({GsErrorCode::PlatformError, "Float stat lookup failed: " + name}); return;
+    }
+    setFloat(name, static_cast<double>(current) + delta, std::move(callback));
 }
 
-void StatsSteam::storeStats(OnComplete callback) {
+void StatsSteam::flush(OnComplete callback) {
     auto* stats = SteamUserStats();
-    if (!stats) {
-        callback.failure("SteamUserStats interface unavailable");
-        return;
-    }
+    if (!stats) { callback.failure({GsErrorCode::NotReady, "Stats unavailable"}); return; }
     if (!stats->StoreStats()) {
-        callback.failure("StoreStats() call failed");
-        return;
+        callback.failure({GsErrorCode::PlatformError, "Stat submission rejected"}); return;
     }
-    callback.success();
+    callback.success(); // SDK accepted submission, not server acknowledgement.
 }
 
-bool StatsSteam::resetAllStats(bool achievementsToo) {
+void StatsSteam::resetAll(bool includeAchievements, OnComplete callback) {
     auto* stats = SteamUserStats();
-    if (!stats) return false;
-    bool ok = stats->ResetAllStats(achievementsToo);
-    if (ok) {
-        if (achievementsToo && _invalidateAchievements) _invalidateAchievements();
-        CC_LOG_INFO("[Steam] ResetAllStats(achievementsToo=%d) OK", achievementsToo);
+    if (!stats) { callback.failure({GsErrorCode::NotReady, "Stats unavailable"}); return; }
+    if (!stats->ResetAllStats(includeAchievements)) {
+        callback.failure({GsErrorCode::PlatformError, "Stat reset rejected"}); return;
     }
-    return ok;
+    callback.success(); // Platform accepted reset; no rollback or server acknowledgement.
 }
 
 } // namespace cc::Gs

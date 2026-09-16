@@ -1,204 +1,107 @@
 #include "AchievementsSteam.h"
-
 #include "base/Log.h"
 
 namespace cc::Gs {
-
 void AchievementsSteam::shutdown() {
-    // Unregister Steam callbacks while the session is still alive; their
-    // destructors may run after SteamAPI_Shutdown and unregistering here turns
-    // those into safe no-ops.
     _cbUserStatsStored.Unregister();
     _cbAchievementStored.Unregister();
-    _onUpdatedCallback.reset();
-    _definitions.reset();
-    _states.clear();
+    _onUpdated.reset();
 }
 
-void AchievementsSteam::queryAchievementDefinitions(OnComplete callback) {
+void AchievementsSteam::queryDefinitions(OnAchievementDefinitions callback) {
     auto* stats = SteamUserStats();
-    if (!stats) {
-        callback.failure("SteamUserStats interface unavailable");
-        return;
+    if (!stats) { callback.failure({GsErrorCode::NotReady, "SteamUserStats unavailable"}); return; }
+    std::vector<AchievementDefinition> definitions;
+    const auto count = stats->GetNumAchievements();
+    definitions.reserve(count);
+    for (uint32 i = 0; i < count; ++i) {
+        const char* id = stats->GetAchievementName(i);
+        if (!id || !*id) { callback.failure({GsErrorCode::PlatformError, "Failed to read achievement definition"}); return; }
+        const char* name = stats->GetAchievementDisplayAttribute(id, "name");
+        const char* description = stats->GetAchievementDisplayAttribute(id, "desc");
+        definitions.push_back({id, name ? name : id, description ? description : ""});
     }
-
-    uint32 numAch = stats->GetNumAchievements();
-    CC_LOG_INFO("[Steam] Found %d achievements", numAch);
-
-    DefinitionMap defs;
-    for (uint32 i = 0; i < numAch; ++i) {
-        const char* apiName = stats->GetAchievementName(i);
-        if (!apiName) continue;
-
-        AchievementDefinition def;
-        def.AchievementId = apiName;
-
-        const char* name = stats->GetAchievementDisplayAttribute(apiName, "name");
-        def.DisplayName = name ? name : apiName;
-
-        const char* desc = stats->GetAchievementDisplayAttribute(apiName, "desc");
-        def.Description = desc ? desc : "";
-
-        defs[apiName] = std::move(def);
-    }
-
-    _definitions = std::move(defs);
-    _states.clear();
-    callback.success();
+    callback.success(std::move(definitions));
 }
 
-void AchievementsSteam::queryAchievementStates(OnComplete callback) {
-    auto* stats = SteamUserStats();
-    if (!stats) {
-        callback.failure("SteamUserStats interface unavailable");
-        return;
-    }
-
-    if (!_definitions.has_value()) {
-        callback.failure("Call queryAchievementDefinitions first");
-        return;
-    }
-
-    for (const auto& pair : *_definitions) {
-        if (!updateCachedState(stats, pair.first)) {
-            _states.clear();
-            callback.failure("Failed to read achievement: " + pair.first);
-            return;
-        }
-    }
-
-    CC_LOG_INFO("[Steam] Cached %d achievement states", static_cast<int>(_states.size()));
-    callback.success();
-}
-
-void AchievementsSteam::unlockAchievements(const std::string& achievementId, OnComplete callback) {
-    auto* stats = SteamUserStats();
-    if (!stats) {
-        callback.failure("SteamUserStats interface unavailable");
-        return;
-    }
-
-    if (!stats->SetAchievement(achievementId.c_str())) {
-        callback.failure("SetAchievement failed");
-        return;
-    }
-
-    CC_LOG_INFO("[Steam] SetAchievement(%s) OK", achievementId.c_str());
-
-    if (!stats->StoreStats()) {
-        callback.failure("StoreStats() call failed");
-        return;
-    }
-
-    updateCachedState(stats, achievementId);
-    callback.success();
-}
-
-void AchievementsSteam::clearAchievement(const std::string& achievementId, OnComplete callback) {
-    auto* stats = SteamUserStats();
-    if (!stats) {
-        callback.failure("SteamUserStats interface unavailable");
-        return;
-    }
-
-    if (!stats->ClearAchievement(achievementId.c_str())) {
-        callback.failure("ClearAchievement failed");
-        return;
-    }
-
-    CC_LOG_INFO("[Steam] ClearAchievement(%s) OK", achievementId.c_str());
-
-    if (!stats->StoreStats()) {
-        callback.failure("StoreStats() call failed");
-        return;
-    }
-
-    updateCachedState(stats, achievementId);
-    callback.success();
-}
-
-bool AchievementsSteam::updateCachedState(ISteamUserStats* stats, const std::string& achievementId, float progressOverride) {
-    bool achieved = false;
-    uint32 unlockTime = 0;
-    if (!stats || !stats->GetAchievementAndUnlockTime(achievementId.c_str(), &achieved, &unlockTime)) {
-        _states.erase(achievementId);
-        return false;
-    }
-
-    AchievementState state;
-    state.AchievementId = achievementId;
-    state.Progress = progressOverride >= 0.0f ? progressOverride : (achieved ? 100.0f : 0.0f);
-    state.UnlockTimeSec = unlockTime;
-    _states[achievementId] = state;
+bool AchievementsSteam::readState(ISteamUserStats* stats, const std::string& id, AchievementState& state) {
+    bool unlocked = false;
+    uint32 time = 0;
+    if (!stats || !stats->GetAchievementAndUnlockTime(id.c_str(), &unlocked, &time)) return false;
+    state.id = id;
+    state.unlocked = unlocked;
+    // Steam's unlock flag does not expose a general achievement progress value.
+    state.progress = unlocked ? std::optional<float>(100.0f) : std::nullopt;
+    state.unlockedAt = unlocked && time != 0 ? std::optional<int64_t>(time) : std::nullopt;
     return true;
 }
 
-void AchievementsSteam::onUserStatsStored(UserStatsStored_t* pCallback) {
-    if (pCallback->m_eResult != k_EResultOK) {
-        invalidateStates();
-        CC_LOG_ERROR("[Steam] StoreStats failed, EResult=%d", static_cast<int>(pCallback->m_eResult));
+void AchievementsSteam::queryStates(OnAchievementStates callback) {
+    auto* stats = SteamUserStats();
+    if (!stats) { callback.failure({GsErrorCode::NotReady, "SteamUserStats unavailable"}); return; }
+    std::vector<AchievementState> states;
+    const auto count = stats->GetNumAchievements();
+    states.reserve(count);
+    for (uint32 i = 0; i < count; ++i) {
+        const char* id = stats->GetAchievementName(i);
+        AchievementState state;
+        if (!id || !*id || !readState(stats, id, state)) {
+            callback.failure({GsErrorCode::PlatformError, "Failed to read achievement state"});
+            return;
+        }
+        states.push_back(std::move(state));
+    }
+    callback.success(std::move(states));
+}
+
+void AchievementsSteam::changeAchievement(const std::string& id, bool unlock, OnComplete callback) {
+    if (id.empty() || id.find('\0') != std::string::npos) {
+        callback.failure({GsErrorCode::InvalidArgument, "Achievement ID must be nonempty and contain no NUL"});
         return;
     }
-    CC_LOG_INFO("[Steam] StoreStats OK");
-}
-
-void AchievementsSteam::onAchievementStored(UserAchievementStored_t* pCallback) {
-    const char* achName = pCallback->m_rgchAchievementName;
-    uint32 cur = pCallback->m_nCurProgress;
-    uint32 max = pCallback->m_nMaxProgress;
-    bool isProgress = (cur != 0 || max != 0);
-
-    if (isProgress) {
-        CC_LOG_INFO("[Steam] Achievement progress: %s %u/%u", achName, cur, max);
-    } else {
-        CC_LOG_INFO("[Steam] Achievement fully unlocked: %s", achName);
-    }
-
     auto* stats = SteamUserStats();
-    if (!stats) return;
-
-    if (isProgress && max > 0) {
-        float pct = static_cast<float>(cur) / static_cast<float>(max) * 100.0f;
-        if (!updateCachedState(stats, achName, pct)) return;
-    } else {
-        if (!updateCachedState(stats, achName)) return;
+    if (!stats) { callback.failure({GsErrorCode::NotReady, "SteamUserStats unavailable"}); return; }
+    bool found = false;
+    const auto count = stats->GetNumAchievements();
+    for (uint32 i = 0; i < count; ++i) {
+        const char* name = stats->GetAchievementName(i);
+        if (name && id == name) { found = true; break; }
     }
-
-    auto* user = SteamUser();
-    if (!user) return;
-
-    _onUpdatedCallback.invoke(achName, _states[achName].Progress, _states[achName].UnlockTimeSec);
-}
-
-AchievementIdsResult
-AchievementsSteam::getAchievementIds() {
-    AchievementIdsResult out;
-    if (!_definitions.has_value()) return out;
-    for (const auto& pair : *_definitions) {
-        out.AchievementIds.push_back(pair.first);
+    if (!found) { callback.failure({GsErrorCode::NotFound, "Unknown achievement: " + id}); return; }
+    if (!(unlock ? stats->SetAchievement(id.c_str()) : stats->ClearAchievement(id.c_str()))) {
+        callback.failure({GsErrorCode::PlatformError, "Failed to modify achievement: " + id});
+        return;
     }
-    return out;
+    if (!stats->StoreStats()) {
+        callback.failure({GsErrorCode::PlatformError, "StoreStats rejected; local achievement state may already have changed"});
+        return;
+    }
+    // Success is SDK acceptance, not server acknowledgement.
+    callback.success();
 }
 
-AchievementDefinitionResult
-AchievementsSteam::getAchievementDefinition(const std::string& achievementId) {
-    AchievementDefinitionResult out;
-    if (!_definitions.has_value()) return out;
-    auto it = _definitions->find(achievementId);
-    if (it == _definitions->end()) return out;
-    out.Definition = it->second;
-    out.Found = true;
-    return out;
+void AchievementsSteam::unlock(const std::string& id, OnComplete callback) {
+    changeAchievement(id, true, std::move(callback));
 }
-
-AchievementStateResult
-AchievementsSteam::getAchievementState(const std::string& achievementId) {
-    AchievementStateResult out;
-    auto it = _states.find(achievementId);
-    if (it == _states.end()) return out;
-    out.State = it->second;
-    out.Found = true;
-    return out;
+void AchievementsSteam::clearAchievement(const std::string& id, OnComplete callback) {
+    changeAchievement(id, false, std::move(callback));
 }
-
+void AchievementsSteam::onUserStatsStored(UserStatsStored_t* result) {
+    auto* utils = SteamUtils();
+    if (!utils || result->m_nGameID != utils->GetAppID()) return;
+    if (result->m_eResult != k_EResultOK) {
+        CC_LOG_ERROR("[Steam] StoreStats failed after submission, EResult=%d", static_cast<int>(result->m_eResult));
+    }
+}
+void AchievementsSteam::onAchievementStored(UserAchievementStored_t* result) {
+    auto* utils = SteamUtils();
+    if (!utils || result->m_nGameID != utils->GetAppID()) return;
+    AchievementState state;
+    if (!readState(SteamUserStats(), result->m_rgchAchievementName, state)) return;
+    if (!state.unlocked && result->m_nMaxProgress > 0) {
+        const auto current = result->m_nCurProgress > result->m_nMaxProgress ? result->m_nMaxProgress : result->m_nCurProgress;
+        state.progress = static_cast<float>(current) / result->m_nMaxProgress * 100.0f;
+    }
+    _onUpdated.invoke(state);
+}
 } // namespace cc::Gs

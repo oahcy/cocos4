@@ -34,12 +34,24 @@ IntrusivePtr<IGsServices> IGsServices::getServices(GsServicesType provider) {
 GsServicesCommon::GsServicesCommon(GsServicesType provider, std::unique_ptr<GsPlatform> platform)
     : _provider(provider), _session(new GsSession(std::move(platform))) {}
 GsServicesCommon::~GsServicesCommon() { _session->close(); }
-bool GsServicesCommon::init() { return _session->init(); }
+void GsServicesCommon::init(OnComplete callback) { _session->init(std::move(callback)); }
+ServicesState GsServicesCommon::getState() const { return _session->getState(); }
 void GsServicesCommon::destroy() { _session->close(); }
 void GsServicesCommon::tick(float dt) { _session->tick(dt); }
 bool GsServicesCommon::isClosed() const { return _session->isClosed(); }
 bool GsServicesCommon::isClosing() const { return _session->isClosing(); }
-bool GsServicesCommon::restartAppIfNecessary(const AppId& appId) { return _session->restartAppIfNecessary(appId); }
+void GsServicesCommon::restartAppIfNecessary(const AppId& appId, OnRestartRequired callback) { _session->restartAppIfNecessary(appId, std::move(callback)); }
+
+bool GsServicesCommon::hasModule(ServicesModule module) const {
+    switch (module) {
+    case ServicesModule::Achievements: return _session->achievements() != nullptr;
+    case ServicesModule::Friends: return _session->friends() != nullptr;
+    case ServicesModule::RemoteStorage: return _session->remoteStorage() != nullptr;
+    case ServicesModule::Stats: return _session->stats() != nullptr;
+    case ServicesModule::Utils: return _session->utils() != nullptr;
+    }
+    return false;
+}
 
 IntrusivePtr<IAchievements> GsServicesCommon::getAchievementsInterface() {
     if (!_session->achievements()) return nullptr;

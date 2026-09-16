@@ -877,6 +877,7 @@ cocos_source_files(
     vendor/gs/Framework/RemoteStorage.h
     vendor/gs/Framework/Stats.h
     vendor/gs/Framework/Utils.h
+    vendor/gs/Framework/commons/GsError.h
     vendor/gs/Framework/commons/GsCallback.h
     vendor/gs/Framework/commons/GsServices.h
     vendor/gs/Framework/commons/GsServicesCommon.h

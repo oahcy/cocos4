@@ -10,12 +10,12 @@ public:
 
     void shutdown() override;
 
-    void setWarningMessageHook(OnWarningMessage callback) override;
+    void setOnDiagnostic(OnDiagnostic callback) override;
 
 private:
     static void steamWarningHook(int severity, const char* msg);
 
-    static OnWarningMessage s_callback;
+    static OnDiagnostic s_callback;
 };
 
 } // namespace cc::Gs

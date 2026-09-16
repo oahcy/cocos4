@@ -25,6 +25,7 @@
 #pragma once
 
 #include <string>
+#include "GsError.h"
 #ifndef SWIG
 #include <functional>
 #include <memory>
@@ -37,10 +38,6 @@ namespace cc::Gs {
 class AsyncCallbackBase {};
 class EventDelegateBase {};
 using OnComplete = AsyncCallbackBase;
-using OnAchievementStateUpdated = EventDelegateBase;
-using OnReadFile = AsyncCallbackBase;
-using OnWarningMessage = EventDelegateBase;
-using OnGameRichPresenceJoinRequested = EventDelegateBase;
 #else
 // Shared by callbacks and the session; contains no back-reference to the session.
 struct SessionGate { bool active = false; };
@@ -48,7 +45,7 @@ struct SessionGate { bool active = false; };
 class PendingCallback {
 public:
     virtual ~PendingCallback() = default;
-    virtual void cancel(const std::string& error) = 0;
+    virtual void cancel(const GsError& error) = 0;
     bool completed = false;
     std::shared_ptr<SessionGate> gate;
 };
@@ -57,8 +54,8 @@ template<typename... Args>
 class AsyncCallback {
     struct State : PendingCallback {
         std::function<void(Args...)> success;
-        std::function<void(const std::string&)> failure;
-        void cancel(const std::string& error) override {
+        std::function<void(const GsError&)> failure;
+        void cancel(const GsError& error) override {
             if (completed) return;
             completed = true;
             auto fn = std::move(failure);
@@ -69,7 +66,7 @@ class AsyncCallback {
 public:
     AsyncCallback() = default;
     AsyncCallback(std::function<void(Args...)> success,
-                  std::function<void(const std::string&)> failure) : _state(std::make_shared<State>()) {
+                  std::function<void(const GsError&)> failure) : _state(std::make_shared<State>()) {
         _state->success = std::move(success);
         _state->failure = std::move(failure);
     }
@@ -77,7 +74,7 @@ public:
         auto state = _state; // A callback can close its session and release its owner.
         if (!state || state->completed) return;
         if (state->gate && !state->gate->active) {
-            state->cancel("Services closed");
+            state->cancel({GsErrorCode::Cancelled, "Services closed"});
             return;
         }
         state->completed = true;
@@ -85,7 +82,7 @@ public:
         state->failure = nullptr;
         if (fn) fn(std::forward<Args>(args)...);
     }
-    void failure(const std::string& error) const {
+    void failure(const GsError& error) const {
         auto state = _state;
         if (state) state->cancel(error);
     }
@@ -114,10 +111,6 @@ private:
 };
 
 using OnComplete = AsyncCallback<>;
-using OnAchievementStateUpdated = EventDelegate<std::string, float, uint32_t>;
-using OnReadFile = AsyncCallback<std::string>;
-using OnWarningMessage = EventDelegate<int, std::string>;
-using OnGameRichPresenceJoinRequested = EventDelegate<std::string, std::string>;
 #endif
 
 } // namespace cc::Gs

@@ -28,32 +28,31 @@ bool SteamPlatform::checkDllAvailable() {
     return _dllAvailable;
 }
 
-bool SteamPlatform::restartAppIfNecessary(const AppId& appId) {
-    if (!checkDllAvailable()) return false;
-    if (auto* numericAppId = ccstd::get_if<uint32_t>(&appId)) {
-        return SteamAPI_RestartAppIfNecessary(*numericAppId);
+void SteamPlatform::restartAppIfNecessary(const AppId& appId, OnRestartRequired callback) {
+    const auto* numericAppId = ccstd::get_if<uint32_t>(&appId);
+    if (!numericAppId || *numericAppId == 0) {
+        callback.failure({GsErrorCode::InvalidArgument, "Steam requires a nonzero numeric App ID"}); return;
     }
-    CC_LOG_ERROR("[Steam] restartAppIfNecessary: string AppId is not supported on Steam (requires a numeric App ID)");
-    return false;
+    if (!checkDllAvailable()) { callback.failure({GsErrorCode::NotReady, "steam_api64.dll is unavailable"}); return; }
+    callback.success(SteamAPI_RestartAppIfNecessary(*numericAppId));
 }
 
-bool SteamPlatform::initialize(GsModules& modules) {
-    if (!checkDllAvailable()) return false;
+std::optional<GsError> SteamPlatform::initialize(GsModules& modules) {
+    if (!checkDllAvailable()) return GsError{GsErrorCode::NotReady, "steam_api64.dll is unavailable"};
     SteamErrMsg error = {};
-    if (SteamAPI_InitEx(&error) != k_ESteamAPIInitResult_OK) {
+    const auto result = SteamAPI_InitEx(&error);
+    if (result != k_ESteamAPIInitResult_OK) {
         CC_LOG_ERROR("[Steam] SteamAPI_Init failed: %s", error);
-        return false;
+        return GsError{GsErrorCode::PlatformError, error, std::to_string(static_cast<int>(result))};
     }
     modules.achievements = std::make_unique<AchievementsSteam>();
     modules.friends = std::make_unique<FriendsSteam>();
     _friends = static_cast<FriendsSteam*>(modules.friends.get());
     modules.remoteStorage = std::make_unique<RemoteStorageSteam>();
-    // Both backends belong to this session; the callback is only used by reset.
-    auto* achievements = static_cast<AchievementsSteam*>(modules.achievements.get());
-    modules.stats = std::make_unique<StatsSteam>([achievements] { achievements->invalidateStates(); });
+    modules.stats = std::make_unique<StatsSteam>();
     modules.utils = std::make_unique<UtilsSteam>();
     CC_LOG_INFO("[Steam] SteamAPI_Init OK");
-    return true;
+    return std::nullopt;
 }
 
 void SteamPlatform::pump(float) {

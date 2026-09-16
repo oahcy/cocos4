@@ -31,6 +31,7 @@
 #include "base/Ptr.h"
 #include "base/RefCounted.h"
 #include "GsTypes.h"
+#include "GsCallback.h"
 
 namespace cc::Gs {
 
@@ -47,11 +48,21 @@ enum class GsServicesType : uint8_t {
     GsServicesType_Max
 };
 
+enum class ServicesState : uint8_t { Created = 0, Ready, Closing, Closed };
+enum class ServicesModule : uint8_t { Achievements = 0, Friends, RemoteStorage, Stats, Utils };
+#ifdef SWIG
+using OnRestartRequired = AsyncCallbackBase;
+#else
+using OnRestartRequired = AsyncCallback<bool>;
+#endif
+
 class IGsServices : public RefCounted {
 public:
     virtual ~IGsServices() = default;
 
-    virtual bool init() = 0;
+    virtual void init(OnComplete callback) = 0;
+    virtual ServicesState getState() const = 0;
+    virtual bool hasModule(ServicesModule module) const = 0;
     virtual void destroy() = 0;
     virtual void tick(float deltaTime) = 0;
     virtual bool isClosed() const = 0;
@@ -65,7 +76,7 @@ public:
     virtual cc::IntrusivePtr<IStats> getStatsInterface() = 0;
     virtual cc::IntrusivePtr<IUtils> getUtilsInterface() = 0;
 
-    virtual bool restartAppIfNecessary(const AppId& /*appId*/) { return false; }
+    virtual void restartAppIfNecessary(const AppId& appId, OnRestartRequired callback) = 0;
 
     static cc::IntrusivePtr<IGsServices> getServices(GsServicesType servicesType);
 };
