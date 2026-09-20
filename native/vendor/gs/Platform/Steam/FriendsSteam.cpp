@@ -3,6 +3,7 @@
 
 #include "base/Log.h"
 #include <string>
+#include <algorithm>
 #include <limits>
 
 namespace cc::Gs {
@@ -63,20 +64,6 @@ void FriendsSteam::shutdown() {
     }
     // Release the rooted JS listener for join requests.
     _gameRichPresenceJoinDelegate.reset();
-}
-
-void FriendsSteam::getLocalUser(OnUserProfile callback) {
-    if (!SteamFriends() || !SteamUser()) {
-        callback.failure({GsErrorCode::NotReady, "Local user is not ready"});
-        return;
-    }
-    const auto id = SteamUser()->GetSteamID();
-    const char* name = SteamFriends()->GetPersonaName();
-    if (!id.IsValid() || !name) {
-        callback.failure({GsErrorCode::PlatformError, "Local user lookup failed"});
-        return;
-    }
-    callback.success({std::to_string(id.ConvertToUint64()), name});
 }
 
 void FriendsSteam::getFriends(OnFriends callback) {
@@ -149,11 +136,12 @@ void FriendsSteam::getAvatar(const AccountId& userId, AvatarSize size, OnAvatarL
     } else if (size == AvatarSize::Large && handle == -1) {
         // Prevent memory leak: cap the pending queue to avoid infinite accumulation
         // if the Steam network fails to trigger AvatarImageLoaded_t.
+        update(); // Reclaim timed-out entries before enforcing the queue limit.
         if (_pendingAvatars.size() >= 50) {
             callback.failure({GsErrorCode::Busy, "Avatar request queue full"});
             return;
         }
-        _pendingAvatars.push_back({id, size, std::move(callback), std::chrono::steady_clock::now() + std::chrono::seconds(30)});
+        _pendingAvatars.push_back({id, size, std::move(callback)});
     } else {
         callback.success(std::nullopt);
     }
@@ -192,15 +180,10 @@ void FriendsSteam::onAvatarImageLoaded(AvatarImageLoaded_t* pParam) {
     }
 }
 
-void FriendsSteam::expireAvatarRequests(std::chrono::steady_clock::time_point now) {
-    std::vector<OnAvatarLoaded> expired;
-    for (auto it = _pendingAvatars.begin(); it != _pendingAvatars.end();) {
-        if (it->deadline <= now) {
-            expired.push_back(std::move(it->callback));
-            it = _pendingAvatars.erase(it);
-        } else ++it;
-    }
-    for (auto& callback : expired) callback.failure({GsErrorCode::Timeout, "Avatar request timed out"});
+void FriendsSteam::update() {
+    // Session owns timeout settlement. This backend only releases finished waiters.
+    _pendingAvatars.erase(std::remove_if(_pendingAvatars.begin(), _pendingAvatars.end(),
+        [](const auto& request) { return !request.callback; }), _pendingAvatars.end());
 }
 
 void FriendsSteam::getGroups(OnFriendGroups callback) {

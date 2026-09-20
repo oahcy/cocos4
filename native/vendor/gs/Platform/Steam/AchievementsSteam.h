@@ -6,8 +6,7 @@ namespace cc::Gs {
 class AchievementsSteam : public IAchievementsBackend {
 public:
     AchievementsSteam()
-        : _cbUserStatsStored(this, &AchievementsSteam::onUserStatsStored)
-        , _cbAchievementStored(this, &AchievementsSteam::onAchievementStored) {}
+        : _cbAchievementStored(this, &AchievementsSteam::onAchievementStored) {}
     void shutdown() override;
     void queryDefinitions(OnAchievementDefinitions callback) override;
     void queryStates(OnAchievementStates callback) override;
@@ -17,7 +16,6 @@ public:
 private:
     static bool readState(ISteamUserStats* stats, const std::string& id, AchievementState& state);
     void changeAchievement(const std::string& id, bool unlock, OnComplete callback);
-    STEAM_CALLBACK(AchievementsSteam, onUserStatsStored, UserStatsStored_t, _cbUserStatsStored);
     STEAM_CALLBACK(AchievementsSteam, onAchievementStored, UserAchievementStored_t, _cbAchievementStored);
     OnAchievementUpdated _onUpdated;
 };

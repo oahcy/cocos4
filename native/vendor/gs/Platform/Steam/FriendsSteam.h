@@ -1,7 +1,6 @@
 #pragma once
 
 #include <steam_api.h>
-#include <chrono>
 #include "../../Framework/backends/FriendsBackend.h"
 
 namespace cc::Gs {
@@ -13,9 +12,8 @@ public:
         , _cbGameJoinRequested(this, &FriendsSteam::onGameRichPresenceJoinRequested) {}
 
     void shutdown() override;
-    void expireAvatarRequests(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
+    void update();
 
-    void getLocalUser(OnUserProfile callback) override;
     void getFriends(OnFriends callback) override;
     void getAvatar(const AccountId& userId, AvatarSize size, OnAvatarLoaded callback) override;
     void getGroups(OnFriendGroups callback) override;
@@ -36,7 +34,6 @@ private:
         CSteamID steamId;
         AvatarSize size;
         OnAvatarLoaded callback;
-        std::chrono::steady_clock::time_point deadline;
     };
     std::vector<PendingAvatar> _pendingAvatars;
     OnJoinRequested _gameRichPresenceJoinDelegate;

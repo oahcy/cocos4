@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <chrono>
 #include <optional>
 #include <vector>
 #include "GsServices.h"
@@ -9,10 +10,12 @@
 #include "../backends/RemoteStorageBackend.h"
 #include "../backends/StatsBackend.h"
 #include "../backends/UtilsBackend.h"
+#include "../backends/AccountBackend.h"
 
 namespace cc::Gs {
 
 struct GsModules {
+    std::unique_ptr<IAccountBackend> account;
     std::unique_ptr<IAchievementsBackend> achievements;
     std::unique_ptr<IFriendsBackend> friends;
     std::unique_ptr<IRemoteStorageBackend> remoteStorage;
@@ -22,14 +25,16 @@ struct GsModules {
 };
 
 // SDK-specific preparation and teardown stay outside the generic session.
-// On initialization failure the platform must undo any SDK resources it acquired.
+// initialize may complete inline or later on the engine thread. pump must work while initializing.
+// shutdown must cancel initialization, unregister callbacks, and stop all access to modules.
+// It is also called after failed/partial initialization and must be safe in that state.
 class GsPlatform {
 public:
     virtual ~GsPlatform() = default;
-    virtual std::optional<GsError> initialize(GsModules& modules) = 0;
+    virtual void initialize(GsModules& modules, OnComplete callback) = 0;
     virtual void pump(float dt) = 0;
     virtual void shutdown() = 0;
-    // Like initialize(), launcher preparation completes within this call.
+    // Launcher preparation still completes within this call.
     virtual void restartAppIfNecessary(const AppId&, OnRestartRequired callback) {
         callback.failure({GsErrorCode::NotSupported, "Launcher restart is not supported"});
     }
@@ -65,19 +70,50 @@ public:
     IFriendsBackend* friends() const { return isActive() ? _modules.friends.get() : nullptr; }
     IRemoteStorageBackend* remoteStorage() const { return isActive() ? _modules.remoteStorage.get() : nullptr; }
     IStatsBackend* stats() const { return isActive() ? _modules.stats.get() : nullptr; }
+    IAccountBackend* account() const { return isActive() ? _modules.account.get() : nullptr; }
     IUtilsBackend* utils() const { return isActive() ? _modules.utils.get() : nullptr; }
     const std::shared_ptr<SessionGate>& gate() const { return _gate; }
-    void track(const std::shared_ptr<PendingCallback>& pending);
+    // No timeout unless supplied. Timeout settles the callback, not the SDK operation.
+    void track(const std::shared_ptr<PendingCallback>& pending,
+               std::optional<std::chrono::milliseconds> timeout = std::nullopt);
+
+    // Call under Dispatch and keep it alive through the backend invocation.
+    template<class Backend, typename... Args>
+    Backend* prepare(Backend* backend, const AsyncCallback<Args...>& callback,
+                     const char* module, std::optional<std::chrono::milliseconds> timeout = std::nullopt) {
+        if (!backend) {
+            const auto code = isClosed() || isClosing() ? GsErrorCode::Cancelled
+                : (isActive() ? GsErrorCode::NotSupported : GsErrorCode::NotReady);
+            callback.failure({code, std::string(module) + " unavailable in this session"});
+            return nullptr;
+        }
+        track(callback.pending(), timeout);
+        return backend;
+    }
 
 private:
+    struct Initialization {
+        bool completed = false;
+        std::optional<GsError> error;
+    };
+    void finishInitialization();
     void finishClose();
+    void expireRequests();
+    struct PendingRequest {
+        std::weak_ptr<PendingCallback> callback;
+        std::optional<std::chrono::steady_clock::time_point> deadline;
+    };
     std::unique_ptr<GsPlatform> _platform;
     GsModules _modules;
     std::shared_ptr<SessionGate> _gate = std::make_shared<SessionGate>();
-    std::vector<std::weak_ptr<PendingCallback>> _pending;
+    std::vector<PendingRequest> _pending;
+    std::chrono::steady_clock::time_point _nextPendingCheck{};
     State _state = State::Created;
     unsigned _dispatchDepth = 0;
-    bool _sdkInitialized = false;
+    // Completion callbacks hold only a weak token, never a Session pointer.
+    std::shared_ptr<Initialization> _initialization;
+    std::vector<OnComplete> _initWaiters;
+    bool _platformStarted = false;
     bool _finishingClose = false;
 };
 

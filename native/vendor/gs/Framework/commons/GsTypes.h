@@ -41,4 +41,9 @@ using AppId = ccstd::variant<uint32_t, std::string>;
 // (2^53) and Epic uses GUIDs. Matches FriendInfo::userId.
 using AccountId = std::string;
 
+struct UserProfile {
+    AccountId userId;
+    std::string displayName;
+};
+
 } // namespace cc::Gs

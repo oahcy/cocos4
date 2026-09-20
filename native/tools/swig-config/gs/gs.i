@@ -11,6 +11,7 @@
 #include "vendor/gs/Framework/commons/GsServices.h"
 #include "vendor/gs/Framework/Achievements.h"
 #include "vendor/gs/Framework/Friends.h"
+#include "vendor/gs/Framework/Account.h"
 #include "vendor/gs/Framework/RemoteStorage.h"
 #include "vendor/gs/Framework/Stats.h"
 #include "vendor/gs/Framework/Utils.h"
@@ -50,6 +51,8 @@ using namespace cc::Gs;
 %nodefaultdtor cc::Gs::IGsServices;
 %nodefaultctor cc::Gs::IAchievements;
 %nodefaultdtor cc::Gs::IAchievements;
+%nodefaultctor cc::Gs::IAccount;
+%nodefaultdtor cc::Gs::IAccount;
 %nodefaultctor cc::Gs::IFriends;
 %nodefaultdtor cc::Gs::IFriends;
 %nodefaultctor cc::Gs::IRemoteStorage;
@@ -66,6 +69,7 @@ using namespace cc::Gs;
 %include "vendor/gs/Framework/commons/GsTypes.h"
 %include "vendor/gs/Framework/commons/GsServices.h"
 %include "vendor/gs/Framework/Achievements.h"
+%include "vendor/gs/Framework/Account.h"
 %include "vendor/gs/Framework/Friends.h"
 %include "vendor/gs/Framework/RemoteStorage.h"
 %include "vendor/gs/Framework/Stats.h"

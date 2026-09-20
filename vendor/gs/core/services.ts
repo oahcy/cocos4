@@ -442,7 +442,7 @@ export class UtilsHelper extends GsHelperBase {
 }
 
 // ────────────────────────────────────────────────────
-// FriendsHelper — wraps jsb.IFriends
+// Account and friends data
 // ────────────────────────────────────────────────────
 
 export interface UserProfile { userId: string; displayName: string; }
@@ -451,6 +451,35 @@ export interface AvatarImage { width: number; height: number; data: Uint8Array; 
 export interface FriendGroup { id: string; displayName: string; memberIds: string[]; }
 export interface JoinRequest { userId: string; connectionString: string; }
 
+export class AccountHelper extends GsHelperBase {
+    constructor (native: any, lifecycle: ServicesLifecycle) {
+        super(native, lifecycle, 'AccountHelper');
+    }
+
+    async getUser (): Promise<UserProfile | null> {
+        this.assertAlive();
+
+        return new Promise((resolve, reject) => {
+            this._native.getUser({
+                onSuccess: (value: UserProfile | null) => resolve(value),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
+    }
+
+    async login (): Promise<UserProfile> {
+        this.assertAlive();
+
+        return new Promise((resolve, reject) => {
+            this._native.login({
+                onSuccess: (value: UserProfile) => resolve(value),
+                onFailure: (error: unknown) => reject(this.toError(error)),
+            });
+        });
+    }
+}
+
+// FriendsHelper — wraps jsb.IFriends
 export class FriendsHelper extends GsHelperBase {
     private _joinListeners = new Set<(request: JoinRequest) => void>();
     private _nativeListenerBound = false;
@@ -463,17 +492,6 @@ export class FriendsHelper extends GsHelperBase {
         if (typeof value !== 'string' || (!allowEmpty && !value.length) || value.includes('\0')) {
             throw this.toError({ code: GsErrorCode.InvalidArgument, message: label + ' is invalid' });
         }
-    }
-
-    async getLocalUser (): Promise<UserProfile> {
-        this.assertAlive();
-
-        return new Promise((resolve, reject) => {
-            this._native.getLocalUser({
-                onSuccess: (value: UserProfile) => resolve(value),
-                onFailure: (error: unknown) => reject(this.toError(error)),
-            });
-        });
     }
 
     async getFriends (): Promise<FriendInfo[]> {
@@ -612,6 +630,7 @@ export class GsServicesHelper {
     private _remoteStorage: RemoteStorageHelper | null = null;
     private _stats: StatsHelper | null = null;
     private _utils: UtilsHelper | null = null;
+    private _account: AccountHelper | null = null;
 
     constructor (native: any) {
         this._native = native;
@@ -650,7 +669,7 @@ export class GsServicesHelper {
 
     hasModule (module: number): boolean {
         this._lifecycle.assertReady('hasModule');
-        if (!Number.isInteger(module) || module < 0 || module > 4) {
+        if (!Number.isInteger(module) || module < 0 || module > jsb.ServicesModule.Account) {
             throw new GsError(GsErrorCode.InvalidArgument, 'Invalid module', this._lifecycle.provider);
         }
         return this._native.hasModule(module);
@@ -680,6 +699,7 @@ export class GsServicesHelper {
         this._remoteStorage = null;
         this._stats = null;
         this._utils = null;
+        this._account = null;
         
         // Remove from cache to allow recreation later
         for (const [provider, services] of _servicesCache) {
@@ -742,6 +762,16 @@ export class GsServicesHelper {
             }
         }
         return this._stats;
+    }
+
+    account (): AccountHelper {
+        this._lifecycle.assertReady('account');
+        if (!this._account) {
+            const native = this._native.getAccountInterface();
+            if (!native) throw new GsError(GsErrorCode.NotSupported, '[gs] Account is not supported by this session', this._lifecycle.provider);
+            this._account = new AccountHelper(native, this._lifecycle);
+        }
+        return this._account;
     }
 
     utils (): UtilsHelper {

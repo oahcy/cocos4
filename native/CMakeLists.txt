@@ -862,6 +862,9 @@ cocos_source_files(
     vendor/gs/Framework/backends/GsBackend.h
     vendor/gs/Framework/Achievements.cpp
     vendor/gs/Framework/backends/AchievementsBackend.h
+    vendor/gs/Framework/Account.cpp
+    vendor/gs/Framework/Account.h
+    vendor/gs/Framework/backends/AccountBackend.h
     vendor/gs/Framework/Friends.cpp
     vendor/gs/Framework/backends/FriendsBackend.h
     vendor/gs/Framework/RemoteStorage.cpp
@@ -890,6 +893,8 @@ if(USE_VENDOR_STEAM)
 cocos_source_files(
     vendor/gs/Platform/Steam/AchievementsSteam.cpp
     vendor/gs/Platform/Steam/AchievementsSteam.h
+    vendor/gs/Platform/Steam/AccountSteam.cpp
+    vendor/gs/Platform/Steam/AccountSteam.h
     vendor/gs/Platform/Steam/FriendsSteam.cpp
     vendor/gs/Platform/Steam/FriendsSteam.h
     vendor/gs/Platform/Steam/RemoteStorageSteam.cpp

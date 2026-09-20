@@ -1,4 +1,5 @@
 #include "StatsSteam.h"
+#include "base/Log.h"
 
 #include <cmath>
 #include <limits>
@@ -14,6 +15,22 @@ bool validFloat(double value) {
 constexpr int64_t MIN_INT = std::numeric_limits<int32_t>::min();
 constexpr int64_t MAX_INT = std::numeric_limits<int32_t>::max();
 } // namespace
+
+void StatsSteam::shutdown() {
+    _cbUserStatsStored.Unregister();
+    _diagnostic = nullptr;
+}
+
+void StatsSteam::onUserStatsStored(UserStatsStored_t* result) {
+    auto* utils = SteamUtils();
+    if (!result || !utils || result->m_nGameID != utils->GetAppID() || result->m_eResult == k_EResultOK) return;
+    std::string message = "StoreStats failed after submission, EResult=" + std::to_string(static_cast<int>(result->m_eResult));
+    if (result->m_eResult == k_EResultInvalidParam) {
+        message += "; query stats again to observe server-corrected values; no automatic retry";
+    }
+    CC_LOG_ERROR("[Steam] %s", message.c_str());
+    if (_diagnostic) _diagnostic({DiagnosticLevel::Error, std::move(message)});
+}
 
 void StatsSteam::getInt(const std::string& name, OnStatInt callback) {
     if (!validName(name)) { callback.failure({GsErrorCode::InvalidArgument, "Invalid stat name"}); return; }

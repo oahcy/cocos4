@@ -5,7 +5,6 @@
 namespace cc::Gs {
 class IFriendsBackend : public GsBackend {
 public:
-    virtual void getLocalUser(OnUserProfile callback) = 0;
     virtual void getFriends(OnFriends callback) = 0;
     virtual void getAvatar(const AccountId& userId, AvatarSize size, OnAvatarLoaded callback) = 0;
     virtual void getGroups(OnFriendGroups callback) { callback.failure({GsErrorCode::NotSupported, "getGroups is not supported"}); }

@@ -1,6 +1,7 @@
 #include "SteamServicesModule.h"
 #include "AchievementsSteam.h"
 #include "FriendsSteam.h"
+#include "AccountSteam.h"
 #include "RemoteStorageSteam.h"
 #include "StatsSteam.h"
 #include "UtilsSteam.h"
@@ -37,31 +38,42 @@ void SteamPlatform::restartAppIfNecessary(const AppId& appId, OnRestartRequired 
     callback.success(SteamAPI_RestartAppIfNecessary(*numericAppId));
 }
 
-std::optional<GsError> SteamPlatform::initialize(GsModules& modules) {
-    if (!checkDllAvailable()) return GsError{GsErrorCode::NotReady, "steam_api64.dll is unavailable"};
+void SteamPlatform::initialize(GsModules& modules, OnComplete callback) {
+    if (!checkDllAvailable()) { callback.failure({GsErrorCode::NotReady, "steam_api64.dll is unavailable"}); return; }
     SteamErrMsg error = {};
     const auto result = SteamAPI_InitEx(&error);
     if (result != k_ESteamAPIInitResult_OK) {
         CC_LOG_ERROR("[Steam] SteamAPI_Init failed: %s", error);
-        return GsError{GsErrorCode::PlatformError, error, std::to_string(static_cast<int>(result))};
+        callback.failure({GsErrorCode::PlatformError, error, std::to_string(static_cast<int>(result))});
+        return;
     }
+    _sdkInitialized = true;
+    modules.account = std::make_unique<AccountSteam>();
     modules.achievements = std::make_unique<AchievementsSteam>();
     modules.friends = std::make_unique<FriendsSteam>();
     _friends = static_cast<FriendsSteam*>(modules.friends.get());
     modules.remoteStorage = std::make_unique<RemoteStorageSteam>();
-    modules.stats = std::make_unique<StatsSteam>();
+    modules.stats = std::make_unique<StatsSteam>([](DiagnosticMessage message) {
+        UtilsSteam::enqueueDiagnostic(std::move(message));
+    });
     modules.utils = std::make_unique<UtilsSteam>();
+    _utils = static_cast<UtilsSteam*>(modules.utils.get());
     CC_LOG_INFO("[Steam] SteamAPI_Init OK");
-    return std::nullopt;
+    callback.success();
 }
 
-void SteamPlatform::pump(float) {
+void SteamPlatform::pump(float dt) {
     // Session Dispatch keeps backends alive throughout this pump.
-    _friends->expireAvatarRequests();
+    if (!_sdkInitialized) return;
     SteamAPI_RunCallbacks();
+    if (_friends) _friends->update();
+    if (_utils) _utils->update();
 }
 void SteamPlatform::shutdown() {
     _friends = nullptr;
+    _utils = nullptr;
+    if (!_sdkInitialized) return;
+    _sdkInitialized = false;
     SteamAPI_Shutdown();
     CC_LOG_INFO("[Steam] SteamAPI_Shutdown");
 }

@@ -19,10 +19,6 @@ enum class OverlayDialog : uint8_t {
     Friends = 0, Community, Players, Settings, OfficialGameGroup, Stats, Achievements
 };
 
-struct UserProfile {
-    AccountId userId;
-    std::string displayName;
-};
 struct FriendInfo {
     AccountId userId;
     std::string displayName;
@@ -46,14 +42,12 @@ struct JoinRequest {
 };
 
 #ifdef SWIG
-using OnUserProfile = AsyncCallbackBase;
 using OnFriends = AsyncCallbackBase;
 using OnAvatarLoaded = AsyncCallbackBase;
 using OnFriendGroups = AsyncCallbackBase;
 using OnPresenceValue = AsyncCallbackBase;
 using OnJoinRequested = EventDelegateBase;
 #else
-using OnUserProfile = AsyncCallback<UserProfile>;
 using OnFriends = AsyncCallback<std::vector<FriendInfo>>;
 using OnAvatarLoaded = AsyncCallback<std::optional<AvatarImage>>;
 using OnFriendGroups = AsyncCallback<std::vector<FriendGroup>>;
@@ -65,7 +59,6 @@ using OnJoinRequested = EventDelegate<JoinRequest>;
 class IFriends final : public cc::RefCounted {
 public:
     ~IFriends() override;
-    void getLocalUser(OnUserProfile callback);
     void getFriends(OnFriends callback);
     void getAvatar(const AccountId& userId, AvatarSize size, OnAvatarLoaded callback);
     void getGroups(OnFriendGroups callback);

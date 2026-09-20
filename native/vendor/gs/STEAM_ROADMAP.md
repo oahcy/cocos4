@@ -33,7 +33,7 @@ TS AchievementsHelper）。由 Session 独占 Backend，对 JS 只暴露模块�
 
 ## 接口细节
 
-以下是尚未实现能力的 Steam Backend 参考清单，不是已确定的 GS 公共接口。新增 API 应按平台无关、异步查询及结构化错误约定设计，再由 Backend 适配。当前 Friends.getLocalUser 已提供本地用户 ID 和显示名；完整认证仍未实现。
+以下是尚未实现能力的 Steam Backend 参考清单，不是已确定的 GS 公共接口。新增 API 应按平台无关、异步查询及结构化错误约定设计，再由 Backend 适配。当前 Account.getUser 已提供本地用户 ID 和显示名，Account.login 预留可选的平台登录入口（Steam 返回 NotSupported）；票据和游戏服务器认证仍未实现。
 
 ### User（用户）
 

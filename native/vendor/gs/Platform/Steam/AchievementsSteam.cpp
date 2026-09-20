@@ -1,9 +1,7 @@
 #include "AchievementsSteam.h"
-#include "base/Log.h"
 
 namespace cc::Gs {
 void AchievementsSteam::shutdown() {
-    _cbUserStatsStored.Unregister();
     _cbAchievementStored.Unregister();
     _onUpdated.reset();
 }
@@ -85,13 +83,6 @@ void AchievementsSteam::unlock(const std::string& id, OnComplete callback) {
 }
 void AchievementsSteam::clearAchievement(const std::string& id, OnComplete callback) {
     changeAchievement(id, false, std::move(callback));
-}
-void AchievementsSteam::onUserStatsStored(UserStatsStored_t* result) {
-    auto* utils = SteamUtils();
-    if (!utils || result->m_nGameID != utils->GetAppID()) return;
-    if (result->m_eResult != k_EResultOK) {
-        CC_LOG_ERROR("[Steam] StoreStats failed after submission, EResult=%d", static_cast<int>(result->m_eResult));
-    }
 }
 void AchievementsSteam::onAchievementStored(UserAchievementStored_t* result) {
     auto* utils = SteamUtils();

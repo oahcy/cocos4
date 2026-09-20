@@ -8,53 +8,29 @@ IAchievements::~IAchievements() = default;
 
 void IAchievements::queryDefinitions(OnAchievementDefinitions callback) {
     GsSession::Dispatch dispatch(*_session);
-    auto* backend = _session->achievements();
-    if (!backend) {
-        const auto code = _session->isClosed() || _session->isClosing() ? GsErrorCode::Cancelled
-            : (_session->isActive() ? GsErrorCode::NotSupported : GsErrorCode::NotReady);
-        callback.failure({code, "Achievements unavailable in this session"});
-        return;
-    }
-    _session->track(callback.pending());
+    auto* backend = _session->prepare(_session->achievements(), callback, "Achievements");
+    if (!backend) return;
     backend->queryDefinitions(std::move(callback));
 }
 
 void IAchievements::queryStates(OnAchievementStates callback) {
     GsSession::Dispatch dispatch(*_session);
-    auto* backend = _session->achievements();
-    if (!backend) {
-        const auto code = _session->isClosed() || _session->isClosing() ? GsErrorCode::Cancelled
-            : (_session->isActive() ? GsErrorCode::NotSupported : GsErrorCode::NotReady);
-        callback.failure({code, "Achievements unavailable in this session"});
-        return;
-    }
-    _session->track(callback.pending());
+    auto* backend = _session->prepare(_session->achievements(), callback, "Achievements");
+    if (!backend) return;
     backend->queryStates(std::move(callback));
 }
 
 void IAchievements::unlock(const std::string& id, OnComplete callback) {
     GsSession::Dispatch dispatch(*_session);
-    auto* backend = _session->achievements();
-    if (!backend) {
-        const auto code = _session->isClosed() || _session->isClosing() ? GsErrorCode::Cancelled
-            : (_session->isActive() ? GsErrorCode::NotSupported : GsErrorCode::NotReady);
-        callback.failure({code, "Achievements unavailable in this session"});
-        return;
-    }
-    _session->track(callback.pending());
+    auto* backend = _session->prepare(_session->achievements(), callback, "Achievements");
+    if (!backend) return;
     backend->unlock(id, std::move(callback));
 }
 
 void IAchievements::clearAchievement(const std::string& id, OnComplete callback) {
     GsSession::Dispatch dispatch(*_session);
-    auto* backend = _session->achievements();
-    if (!backend) {
-        const auto code = _session->isClosed() || _session->isClosing() ? GsErrorCode::Cancelled
-            : (_session->isActive() ? GsErrorCode::NotSupported : GsErrorCode::NotReady);
-        callback.failure({code, "Achievements unavailable in this session"});
-        return;
-    }
-    _session->track(callback.pending());
+    auto* backend = _session->prepare(_session->achievements(), callback, "Achievements");
+    if (!backend) return;
     backend->clearAchievement(id, std::move(callback));
 }
 

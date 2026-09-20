@@ -31,6 +31,7 @@
 #include "bindings/manual/jsb_conversions.h"
 #include "Achievements.h"
 #include "Friends.h"
+#include "Account.h"
 #include "RemoteStorage.h"
 #include "Stats.h"
 #include "Utils.h"
@@ -187,6 +188,10 @@ inline bool nativevalue_to_se(const UserProfile& from, se::Value& to, se::Object
     obj->setProperty("displayName", se::Value(from.displayName));
     to.setObject(obj);
     return true;
+}
+inline bool nativevalue_to_se(const std::optional<UserProfile>& from, se::Value& to, se::Object* ctx) {
+    if (!from) { to.setNull(); return true; }
+    return nativevalue_to_se(*from, to, ctx);
 }
 inline bool nativevalue_to_se(const FriendInfo& from, se::Value& to, se::Object*) {
     se::HandleObject obj(se::Object::createPlainObject());

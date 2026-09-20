@@ -29,6 +29,7 @@ import {
     GsServicesHelper,
     AchievementsHelper,
     FriendsHelper,
+    AccountHelper,
     RemoteStorageHelper,
     StatsHelper,
     UtilsHelper,
@@ -53,6 +54,7 @@ export namespace gs {
     export const Services = GsServicesHelper;
     export const Achievements = AchievementsHelper;
     export const Friends = FriendsHelper;
+    export const Account = AccountHelper;
     export const RemoteStorage = RemoteStorageHelper;
     export const Stats = StatsHelper;
     export const Utils = UtilsHelper;

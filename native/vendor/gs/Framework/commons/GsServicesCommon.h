@@ -47,6 +47,7 @@ public:
     IntrusivePtr<IRemoteStorage> getRemoteStorageInterface() override;
     IntrusivePtr<IStats> getStatsInterface() override;
     IntrusivePtr<IUtils> getUtilsInterface() override;
+    IntrusivePtr<IAccount> getAccountInterface() override;
 private:
     GsServicesType _provider;
     IntrusivePtr<GsSession> _session;
@@ -55,6 +56,7 @@ private:
     IntrusivePtr<IRemoteStorage> _remoteStorage;
     IntrusivePtr<IStats> _stats;
     IntrusivePtr<IUtils> _utils;
+    IntrusivePtr<IAccount> _account;
 };
 
 } // namespace cc::Gs

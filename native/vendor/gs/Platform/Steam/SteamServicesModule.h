@@ -28,18 +28,21 @@
 
 namespace cc::Gs {
 class FriendsSteam;
+class UtilsSteam;
 
 class SteamPlatform final : public GsPlatform {
 public:
-    std::optional<GsError> initialize(GsModules& modules) override;
+    void initialize(GsModules& modules, OnComplete callback) override;
     void pump(float dt) override;
     void shutdown() override;
     void restartAppIfNecessary(const AppId& appId, OnRestartRequired callback) override;
 private:
     bool checkDllAvailable();
+    bool _sdkInitialized = false;
     bool _dllChecked = false;
     bool _dllAvailable = true;
     FriendsSteam* _friends = nullptr; // Owned by the session's modules.
+    UtilsSteam* _utils = nullptr; // Owned by the session's modules.
 };
 
 IntrusivePtr<IGsServices> createSteamServices();

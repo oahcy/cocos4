@@ -168,8 +168,8 @@ export declare namespace gs {
      * @en Game services instance providing lifecycle management and sub-interface access.
      * @zh 游戏服务实例，提供生命周期管理和子接口访问。
      */
-    export enum ServicesState { Created = 0, Ready, Closing, Closed }
-    export enum ServicesModule { Achievements = 0, Friends, RemoteStorage, Stats, Utils }
+    export enum ServicesState { Created = 0, Ready, Closing, Closed, Initializing }
+    export enum ServicesModule { Achievements = 0, Friends, RemoteStorage, Stats, Utils, Account }
 
     export class Services {
         /** Optional launcher check, only before init(). True means relaunch was requested:
@@ -179,10 +179,11 @@ export declare namespace gs {
          * accept a string. Use the app's configured published ID.
          */
         restartAppIfNecessary (appId: number | string): Promise<boolean>;
-        /** Initializes the SDK session. Repeated calls when Ready succeed.
+        /** Initializes the SDK session. Concurrent calls share one initialization attempt.
+         * Repeated calls when Ready succeed; closing during initialization cancels all waiters.
          * Failure rejects GsError and leaves Created for retry; a closed session cannot reopen.
          * Ready does not imply online connectivity, user authentication, or synchronized data.
-         * This API allows asynchronous completion; Steam currently initializes synchronously.
+         * Platform callbacks are pumped during Initializing. Steam currently completes inline.
          */
         init (): Promise<void>;
         /** Native session snapshot; readable after shutdown. */
@@ -198,6 +199,7 @@ export declare namespace gs {
         /** Module getters throw NotReady before init, NotSupported for an absent module, Cancelled after close. */
         achievements (): Achievements;
         friends (): Friends;
+        account (): Account;
         remoteStorage (): RemoteStorage;
         stats (): Stats;
         utils (): Utils;
@@ -238,16 +240,30 @@ export declare namespace gs {
     // IFriends
     // ────────────────────────────────────────────────────
 
+    /** Account identity is separate from SDK readiness and network connectivity.
+     * Switch accounts by closing the service and creating a new session.
+     */
+    export class Account {
+        /** Current local identity, or null when signed out. Does not open login UI.
+         * A returned user does not prove online connectivity or server authentication.
+         */
+        getUser (): Promise<UserProfile | null>;
+        /** Optional platform-managed login. Resolves with the user when complete.
+         * Already signed in: returns the same user. Concurrent attempts reject Busy.
+         * Unsupported platforms, including Steam's client-managed login, reject NotSupported.
+         * Closing the service cancels pending login; this method never switches an existing user.
+         */
+        login (): Promise<UserProfile>;
+    }
+
     /**
      * @en Provides access to platform friends (list, avatar, groups, rich presence, overlay, invite).
      * @zh 提供平台好友功能的访问（列表、头像、分组、Rich Presence、Overlay、邀请）。
      */
     export class Friends {
-        /** Current session user. Rejects NotReady if no user is available. */
-        getLocalUser (): Promise<UserProfile>;
         /** Snapshot of confirmed friends. Empty lists are []; presence may be Unknown. */
         getFriends (): Promise<FriendInfo[]>;
-        /** Null when no avatar is available. Size defaults to Medium; failures reject GsError. */
+        /** Null when no avatar is available. Size defaults to Medium; failures reject GsError. Pending queries time out after 30 seconds. */
         getAvatar (userId: string, size?: AvatarSize): Promise<AvatarImage | null>;
         /** Optional friend grouping capability; unsupported providers reject NotSupported. */
         getGroups (): Promise<FriendGroup[]>;
@@ -276,6 +292,10 @@ export declare namespace gs {
     /**
      * @en Provides access to platform cloud storage (read, write, delete files).
      * @zh 提供平台云存储的访问（读、写、删除文件）。
+     */
+    /** Read/write waits time out after 60 seconds while the engine pumps callbacks.
+     * Timeout does not cancel SDK work or prove a write did not happen. Conflicting
+     * operations remain Busy until completion or session close; there is no automatic retry.
      */
     export class RemoteStorage {
         /** Writes a snapshot of the supplied bytes, including subarray offsets. SDK completion does not guarantee cloud synchronization. */

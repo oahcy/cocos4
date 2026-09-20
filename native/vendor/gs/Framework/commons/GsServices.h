@@ -40,6 +40,7 @@ class IFriends;
 class IRemoteStorage;
 class IStats;
 class IUtils;
+class IAccount;
 
 enum class GsServicesType : uint8_t {
     Null = 0,
@@ -48,8 +49,9 @@ enum class GsServicesType : uint8_t {
     GsServicesType_Max
 };
 
-enum class ServicesState : uint8_t { Created = 0, Ready, Closing, Closed };
-enum class ServicesModule : uint8_t { Achievements = 0, Friends, RemoteStorage, Stats, Utils };
+// Preserve existing public enum values.
+enum class ServicesState : uint8_t { Created = 0, Ready, Closing, Closed, Initializing };
+enum class ServicesModule : uint8_t { Achievements = 0, Friends, RemoteStorage, Stats, Utils, Account };
 #ifdef SWIG
 using OnRestartRequired = AsyncCallbackBase;
 #else
@@ -75,6 +77,7 @@ public:
     virtual cc::IntrusivePtr<IRemoteStorage> getRemoteStorageInterface() = 0;
     virtual cc::IntrusivePtr<IStats> getStatsInterface() = 0;
     virtual cc::IntrusivePtr<IUtils> getUtilsInterface() = 0;
+    virtual cc::IntrusivePtr<IAccount> getAccountInterface() = 0;
 
     virtual void restartAppIfNecessary(const AppId& appId, OnRestartRequired callback) = 0;
 

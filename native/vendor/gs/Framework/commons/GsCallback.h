@@ -84,7 +84,12 @@ public:
     }
     void failure(const GsError& error) const {
         auto state = _state;
-        if (state) state->cancel(error);
+        if (!state || state->completed) return;
+        if (state->gate && !state->gate->active) {
+            state->cancel({GsErrorCode::Cancelled, "Services closed"});
+        } else {
+            state->cancel(error);
+        }
     }
     explicit operator bool() const { return _state && !_state->completed; }
     void reset() { _state.reset(); }

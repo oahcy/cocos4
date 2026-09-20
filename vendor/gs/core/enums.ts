@@ -34,8 +34,8 @@ if (JSB && jsb.IGsServices) {
         Steam: 1,
         Epic: 2, // Not implemented yet — no native module/factory registered.
     };
-    jsb.ServicesState = { Created: 0, Ready: 1, Closing: 2, Closed: 3 };
-    jsb.ServicesModule = { Achievements: 0, Friends: 1, RemoteStorage: 2, Stats: 3, Utils: 4 };
+    jsb.ServicesState = { Created: 0, Ready: 1, Closing: 2, Closed: 3, Initializing: 4 };
+    jsb.ServicesModule = { Achievements: 0, Friends: 1, RemoteStorage: 2, Stats: 3, Utils: 4, Account: 5 };
     jsb.DiagnosticLevel = { Unknown: 0, Info: 1, Warning: 2, Error: 3 };
     // cc::Gs::PresenceState in Framework/Friends.h
     jsb.PresenceState = { Unknown: 0, Offline: 1, Online: 2, Away: 3, Busy: 4 };

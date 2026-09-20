@@ -48,6 +48,7 @@ bool GsServicesCommon::hasModule(ServicesModule module) const {
     case ServicesModule::Friends: return _session->friends() != nullptr;
     case ServicesModule::RemoteStorage: return _session->remoteStorage() != nullptr;
     case ServicesModule::Stats: return _session->stats() != nullptr;
+    case ServicesModule::Account: return _session->account() != nullptr;
     case ServicesModule::Utils: return _session->utils() != nullptr;
     }
     return false;
@@ -81,6 +82,12 @@ IntrusivePtr<IUtils> GsServicesCommon::getUtilsInterface() {
     if (!_session->utils()) return nullptr;
     if (!_utils) _utils = new IUtils(_session);
     return _utils;
+}
+
+IntrusivePtr<IAccount> GsServicesCommon::getAccountInterface() {
+    if (!_session->account()) return nullptr;
+    if (!_account) _account = new IAccount(_session);
+    return _account;
 }
 
 } // namespace cc::Gs
